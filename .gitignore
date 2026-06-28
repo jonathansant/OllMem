@@ -1,0 +1,27 @@
+## .NET / build artifacts
+bin/
+obj/
+out/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+.vs/
+
+## Rider / VS Code
+.idea/
+.vscode/
+
+## Test results
+TestResults/
+*.trx
+coverage*.xml
+*.coverage
+
+## OS
+.DS_Store
+Thumbs.db
+
+## Local data (encrypted blobs / dev state)
+*.aegisdb
+.aegis-data/
