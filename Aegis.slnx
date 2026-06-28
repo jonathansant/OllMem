@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Aegis.Api/Aegis.Api.csproj" />
     <Project Path="src/Aegis.Core/Aegis.Core.csproj" />
+    <Project Path="src/Aegis.Mcp/Aegis.Mcp.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Aegis.Core.Tests/Aegis.Core.Tests.csproj" />

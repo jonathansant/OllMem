@@ -26,7 +26,8 @@ Aegis.sln
 │  │  ├─ Security/                Ed25519, AES-256-GCM cipher, hash-chained audit
 │  │  ├─ Retrieval/               SoftDecayScorer (decay + recency/usage weight)
 │  │  └─ Engine/                  AegisMemoryEngine (orchestrator)
-│  └─ Aegis.Api/                  ASP.NET Core minimal API + Ed25519 auth middleware
+│  ├─ Aegis.Api/                  ASP.NET Core minimal API + Ed25519 auth middleware
+│  └─ Aegis.Mcp/                  Model Context Protocol server (stdio) over the engine
 └─ tests/
    └─ Aegis.Core.Tests/          xUnit unit + API integration tests
 ```
@@ -70,6 +71,44 @@ curl -s "$BASE/v1/neighbors?owner=demo&scope=user&scopeId=u1&subject=user"
 # Verifiable audit log (REQ-3.3)
 curl -s "$BASE/v1/audit?owner=demo&scope=user&scopeId=u1"
 ```
+
+## MCP server (REQ-1.2)
+
+`Aegis.Mcp` exposes the memory layer over the **Model Context Protocol** (stdio
+transport) using the open-source [`ModelContextProtocol`](https://www.nuget.org/packages/ModelContextProtocol)
+C# SDK, so any MCP-capable client (Claude Desktop, IDE agents, agent frameworks)
+gets portable memory with zero custom integration code.
+
+Tools exposed:
+
+| Tool              | Purpose                                              |
+|-------------------|------------------------------------------------------|
+| `aegis_remember`  | Store one fact (optional subject/predicate/object)   |
+| `aegis_extract`   | Auto-extract & store facts from a transcript         |
+| `aegis_recall`    | Hybrid semantic recall with time-aware reranking     |
+| `aegis_neighbors` | Traverse an entity's graph relationships             |
+
+Run it:
+
+```bash
+dotnet run --project src/Aegis.Mcp        # speaks MCP over stdin/stdout
+```
+
+Register it with an MCP client (e.g. Claude Desktop `claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "aegis": {
+      "command": "dotnet",
+      "args": ["run", "--project", "/abs/path/to/src/Aegis.Mcp"],
+      "env": { "AEGIS_MASTER_KEY_BASE64": "<optional 32-byte base64 key>" }
+    }
+  }
+}
+```
+
+> Logs go to **stderr** because stdout is the MCP protocol channel.
 
 ## API
 
@@ -138,7 +177,7 @@ registering your own implementation **before** `AddAegisMemory()`:
 | Requirement | Where it lives |
 |-------------|----------------|
 | REQ-1.1 Hierarchical scope (User/Agent/Session) | `Domain/MemoryScope.cs`, `Domain/Namespace.cs` |
-| REQ-1.2 SDK/MCP-friendly integration            | `Aegis.Api` minimal API (HTTP surface) |
+| REQ-1.2 SDK/MCP integration                     | `Aegis.Mcp` (Model Context Protocol server) + `Aegis.Api` (HTTP surface) |
 | REQ-1.3 Ed25519 request signing                 | `Security/Ed25519SignatureScheme.cs`, `Api/SignatureAuthMiddleware.cs` |
 | REQ-2.1 Automatic fact extraction               | `Extraction/RuleBasedFactExtractor.cs` |
 | REQ-2.2 Conflict resolution                     | `Engine/AegisMemoryEngine.StoreFactAsync` |
@@ -152,6 +191,7 @@ registering your own implementation **before** `AddAegisMemory()`:
 ## Open-source dependencies
 
 - [BouncyCastle.Cryptography](https://www.bouncycastle.org/) (MIT) — Ed25519
+- [ModelContextProtocol](https://github.com/modelcontextprotocol/csharp-sdk) (MIT) — MCP server SDK
 - xUnit + `Microsoft.AspNetCore.Mvc.Testing` — testing
 
 AES-256-GCM, HKDF and SHA-256 use the .NET base class library.
