@@ -26,6 +26,7 @@ Aegis.sln
 │  │  ├─ Security/                Ed25519, AES-256-GCM cipher, hash-chained audit
 │  │  ├─ Retrieval/               SoftDecayScorer (decay + recency/usage weight)
 │  │  └─ Engine/                  AegisMemoryEngine (orchestrator)
+│  ├─ Aegis.Storage.Sqlite/       SQLite-backed persistent stores (opt-in)
 │  ├─ Aegis.Api/                  ASP.NET Core minimal API + Ed25519 auth middleware
 │  └─ Aegis.Mcp/                  Model Context Protocol server (stdio) over the engine
 └─ tests/
@@ -71,6 +72,30 @@ curl -s "$BASE/v1/neighbors?owner=demo&scope=user&scopeId=u1&subject=user"
 # Verifiable audit log (REQ-3.3)
 curl -s "$BASE/v1/audit?owner=demo&scope=user&scopeId=u1"
 ```
+
+## Persistence
+
+By default everything is in-memory (great for tests and demos). To persist
+across restarts, opt into the **SQLite** store (`Aegis.Storage.Sqlite`, built on
+the open-source `Microsoft.Data.Sqlite`). One `memories` table backs both the
+vector index and the knowledge graph, so superseding a fact removes it from both
+views atomically; blobs and the hash-chained audit log get their own tables.
+
+```bash
+# API
+Aegis__Sqlite__Path=./data/aegis.db \
+Aegis__MasterKeyBase64=$(openssl rand -base64 32) \
+  dotnet run --project src/Aegis.Api
+
+# MCP server
+AEGIS_SQLITE_PATH=./data/aegis.db dotnet run --project src/Aegis.Mcp
+```
+
+The store registers via `AddAegisSqliteStorage(path)` **before** `AddAegisMemory()`;
+because the core uses `TryAdd*`, the SQLite stores transparently replace the
+in-memory defaults. Supply a stable `MasterKeyBase64` so encrypted blobs stay
+readable across restarts. Set the WAL files (`*.db-wal`, `*.db-shm`) and the
+`.db` aside from source control (already covered by `.gitignore`).
 
 ## MCP server (REQ-1.2)
 
@@ -170,7 +195,10 @@ registering your own implementation **before** `AddAegisMemory()`:
 | `IFactExtractor`     | `RuleBasedFactExtractor`   | An LLM-based extraction pipeline       |
 | `IVectorStore`       | `InMemoryVectorStore`      | An ANN index (e.g. HNSW / pgvector)   |
 | `IGraphStore`        | `InMemoryGraphStore`       | A graph database                      |
-| `IBlobStore`         | `InMemoryBlobStore`        | Walrus / IPFS                         |
+| `IBlobStore`         | `InMemoryBlobStore`        | Walrus / IPFS (or the SQLite store)   |
+
+A ready-made persistent backend ships in `Aegis.Storage.Sqlite` — see
+[Persistence](#persistence).
 
 ## PRD traceability
 
@@ -183,7 +211,7 @@ registering your own implementation **before** `AddAegisMemory()`:
 | REQ-2.2 Conflict resolution                     | `Engine/AegisMemoryEngine.StoreFactAsync` |
 | REQ-2.3 Edge encryption                          | `Security/AesGcmPayloadCipher.cs` |
 | REQ-3.1 Hybrid datastore (graph + vector)       | `Storage/InMemoryVectorStore.cs`, `Storage/InMemoryGraphStore.cs` |
-| REQ-3.2 Persistent blob storage                 | `Storage/InMemoryBlobStore.cs` (content-addressed) |
+| REQ-3.2 Persistent blob storage                 | `Storage/InMemoryBlobStore.cs` + `Aegis.Storage.Sqlite/SqliteBlobStore.cs` (content-addressed) |
 | REQ-3.3 Cryptographic audit logs                | `Security/HashChainedAuditLog.cs` |
 | REQ-4.1 Soft-decay scoring                       | `Retrieval/SoftDecayScorer.cs` |
 | REQ-4.2 Time-aware reranking                     | `Engine/AegisMemoryEngine.RecallAsync` |
@@ -192,6 +220,7 @@ registering your own implementation **before** `AddAegisMemory()`:
 
 - [BouncyCastle.Cryptography](https://www.bouncycastle.org/) (MIT) — Ed25519
 - [ModelContextProtocol](https://github.com/modelcontextprotocol/csharp-sdk) (MIT) — MCP server SDK
+- [Microsoft.Data.Sqlite](https://learn.microsoft.com/dotnet/standard/data/sqlite/) (MIT) — persistent storage
 - xUnit + `Microsoft.AspNetCore.Mvc.Testing` — testing
 
 AES-256-GCM, HKDF and SHA-256 use the .NET base class library.

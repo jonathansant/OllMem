@@ -22,6 +22,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Aegis.Core\Aegis.Core.csproj" />
     <ProjectReference Include="..\..\src\Aegis.Api\Aegis.Api.csproj" />
+    <ProjectReference Include="..\..\src\Aegis.Storage.Sqlite\Aegis.Storage.Sqlite.csproj" />
   </ItemGroup>
 
 </Project>

@@ -25,3 +25,7 @@ Thumbs.db
 ## Local data (encrypted blobs / dev state)
 *.aegisdb
 .aegis-data/
+data/
+*.db
+*.db-wal
+*.db-shm

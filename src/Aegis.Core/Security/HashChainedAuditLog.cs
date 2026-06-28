@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using Aegis.Core.Abstractions;
 using Aegis.Core.Domain;
 
@@ -12,8 +10,6 @@ namespace Aegis.Core.Security;
 /// </summary>
 public sealed class HashChainedAuditLog : IAuditLog
 {
-    private const string GenesisHash = "0000000000000000000000000000000000000000000000000000000000000000";
-
     private readonly List<AuditEntry> _entries = [];
     private readonly object _gate = new();
 
@@ -27,9 +23,9 @@ public sealed class HashChainedAuditLog : IAuditLog
         lock (_gate)
         {
             var seq = _entries.Count;
-            var prevHash = _entries.Count == 0 ? GenesisHash : _entries[^1].Hash;
+            var prevHash = _entries.Count == 0 ? AuditChain.GenesisHash : _entries[^1].Hash;
             var timestamp = DateTimeOffset.UtcNow;
-            var hash = ComputeHash(seq, timestamp, action, ns.Key, nodeId, detail, prevHash);
+            var hash = AuditChain.ComputeHash(seq, timestamp, action, ns.Key, nodeId, detail, prevHash);
 
             var entry = new AuditEntry(seq, timestamp, action, ns.Key, nodeId, detail, prevHash, hash);
             _entries.Add(entry);
@@ -58,13 +54,13 @@ public sealed class HashChainedAuditLog : IAuditLog
     {
         lock (_gate)
         {
-            var prevHash = GenesisHash;
+            var prevHash = AuditChain.GenesisHash;
             foreach (var e in _entries)
             {
                 if (e.PrevHash != prevHash)
                     return ValueTask.FromResult(false);
 
-                var expected = ComputeHash(
+                var expected = AuditChain.ComputeHash(
                     e.Sequence, e.Timestamp, e.Action, e.NamespaceKey, e.NodeId, e.Detail, e.PrevHash);
                 if (expected != e.Hash)
                     return ValueTask.FromResult(false);
@@ -74,27 +70,5 @@ public sealed class HashChainedAuditLog : IAuditLog
 
             return ValueTask.FromResult(true);
         }
-    }
-
-    private static string ComputeHash(
-        long seq,
-        DateTimeOffset timestamp,
-        AuditAction action,
-        string namespaceKey,
-        Guid nodeId,
-        string detail,
-        string prevHash)
-    {
-        var canonical = string.Join('\n',
-            seq.ToString(),
-            timestamp.UtcTicks.ToString(),
-            action.ToString(),
-            namespaceKey,
-            nodeId.ToString(),
-            detail,
-            prevHash);
-
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
-        return Convert.ToHexString(hash).ToLowerInvariant();
     }
 }

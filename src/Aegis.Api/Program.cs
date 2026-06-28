@@ -2,12 +2,19 @@ using Aegis.Api;
 using Aegis.Core;
 using Aegis.Core.Abstractions;
 using Aegis.Core.Domain;
+using Aegis.Storage.Sqlite;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // API options (Aegis:RequireSignature, Aegis:MaxClockSkewSeconds).
 var apiOptions = builder.Configuration.GetSection("Aegis").Get<AegisApiOptions>() ?? new AegisApiOptions();
 builder.Services.AddSingleton(apiOptions);
+
+// Opt into persistent SQLite storage when Aegis:Sqlite:Path is configured.
+// Registered before AddAegisMemory so its TryAdd defaults don't take effect.
+var sqlitePath = builder.Configuration["Aegis:Sqlite:Path"];
+if (!string.IsNullOrWhiteSpace(sqlitePath))
+    builder.Services.AddAegisSqliteStorage(sqlitePath);
 
 // Register the Aegis memory layer. A master key may be supplied via
 // Aegis:MasterKeyBase64; otherwise an ephemeral key is generated.
