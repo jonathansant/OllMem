@@ -4,6 +4,7 @@
     <Project Path="src/Aegis.Core/Aegis.Core.csproj" />
     <Project Path="src/Aegis.Mcp/Aegis.Mcp.csproj" />
     <Project Path="src/Aegis.Models.Ollama/Aegis.Models.Ollama.csproj" />
+    <Project Path="src/Aegis.Storage.Git/Aegis.Storage.Git.csproj" />
     <Project Path="src/Aegis.Storage.Sqlite/Aegis.Storage.Sqlite.csproj" />
   </Folder>
   <Folder Name="/tests/">
