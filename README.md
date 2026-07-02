@@ -7,10 +7,14 @@ extraction, conflict resolution, client-side encryption, and time-aware
 reranking.
 
 This repository is a working V1 implementation of the
-[Aegis v2 PRD](#prd-traceability). The default build runs **fully offline** with
-no external API keys or model weights — every component has a deterministic
-in-process implementation behind an interface, so production deployments can
-swap in real embedding models, blob networks (Walrus/IPFS), etc.
+[Aegis v2 PRD](#prd-traceability). **Model integration is free and open-source
+by default**: Aegis talks to a local [Ollama](https://ollama.com) server for
+real semantic embeddings and LLM fact extraction — no API key, no cloud
+account, no per-token cost ([details](#model-backend-open-source-by-default)).
+If no Ollama server is running, every component falls back to a deterministic
+in-process implementation, so the build always works fully offline (tests, CI,
+demos). Production deployments can swap any component — embedding models, blob
+networks (Walrus/IPFS), etc. — behind its interface.
 
 ## Solution layout
 
@@ -26,6 +30,7 @@ Aegis.sln
 │  │  ├─ Security/                Ed25519, AES-256-GCM cipher, hash-chained audit
 │  │  ├─ Retrieval/               SoftDecayScorer (decay + recency/usage weight)
 │  │  └─ Engine/                  AegisMemoryEngine (orchestrator)
+│  ├─ Aegis.Models.Ollama/        Free open-source model backend (local Ollama server)
 │  ├─ Aegis.Storage.Sqlite/       SQLite-backed persistent stores (opt-in)
 │  ├─ Aegis.Api/                  ASP.NET Core minimal API + Ed25519 auth middleware
 │  └─ Aegis.Mcp/                  Model Context Protocol server (stdio) over the engine
@@ -36,7 +41,7 @@ Aegis.sln
 ## Quick start
 
 ```bash
-# Build & test (37 tests)
+# Build & test (49 tests, all offline — no model or API key needed)
 dotnet test
 
 # Run the API (listens on http://localhost:5021 by default)
@@ -96,6 +101,86 @@ because the core uses `TryAdd*`, the SQLite stores transparently replace the
 in-memory defaults. Supply a stable `MasterKeyBase64` so encrypted blobs stay
 readable across restarts. Set the WAL files (`*.db-wal`, `*.db-shm`) and the
 `.db` aside from source control (already covered by `.gitignore`).
+
+## Model backend: open-source by default
+
+Aegis needs models for two jobs — **embedding** text into vectors for semantic
+recall, and **extracting** facts from free-form conversation. Both default to
+**free, open-source models served locally by [Ollama](https://ollama.com)**, so
+there is **no API key, no cloud account and no per-token cost**. If no Ollama
+server is reachable, Aegis silently keeps its deterministic built-in components
+(hashing embedder + rule-based extractor), so everything still runs fully
+offline.
+
+### What the models buy you
+
+| Job | Offline default | With Ollama |
+|-----|-----------------|-------------|
+| Embeddings (`IEmbeddingService`) | Lexical hashing — ranks by keyword overlap | `nomic-embed-text` — ranks by *meaning* ("Porto" matches "where does the user live") |
+| Fact extraction (`IFactExtractor`) | Curated regex patterns ("I live in X") | `llama3.2` — open-domain phrasing ("we relocated to Portland last spring") |
+
+Extraction degrades gracefully **per call**: if the model is down, times out or
+returns unusable output, the transcript is handed to the rule-based extractor
+instead — extraction never fails outright.
+
+### Setup (two commands)
+
+```bash
+# 1. Install Ollama (https://ollama.com/download), then pull the two models:
+ollama pull nomic-embed-text   # embeddings (Apache-2.0, 768-dim, ~270 MB)
+ollama pull llama3.2           # fact extraction (open weights, ~2 GB)
+
+# 2. Run Aegis as usual — it auto-detects the server at http://localhost:11434:
+dotnet run --project src/Aegis.Api
+```
+
+At startup you'll see either `Ollama detected … embeddings use open-source
+model 'nomic-embed-text'` or a warning that it fell back to the offline
+components.
+
+### Configuration
+
+API (`appsettings.json` or environment):
+
+| Setting | Default | Purpose |
+|---------|---------|---------|
+| `Aegis:Ollama:Enabled` | `true` | Set `false` to pin the deterministic offline components |
+| `Aegis:Ollama:Endpoint` | `http://localhost:11434` | Ollama server URL |
+| `Aegis:Ollama:EmbeddingModel` | `nomic-embed-text` | Any Ollama embedding model tag |
+| `Aegis:Ollama:ChatModel` | `llama3.2` | Any Ollama chat model tag (used for extraction) |
+| `Aegis:Ollama:UseChatExtraction` | `true` | Set `false` to keep rule-based extraction only |
+
+MCP server (environment variables): `AEGIS_OLLAMA=off` disables the backend;
+`AEGIS_OLLAMA_ENDPOINT`, `AEGIS_OLLAMA_EMBED_MODEL` and
+`AEGIS_OLLAMA_CHAT_MODEL` override the same defaults.
+
+### Model-agnostic by design
+
+There is **one** implementation, not one per model. Ollama serves every model
+it hosts behind the same two endpoints (`/api/embed`, `/api/chat`), so swapping
+models — `qwen2.5`, `mistral`, `mxbai-embed-large`, anything you `ollama pull`
+— is a **configuration change, not code**. The same applies one level up: a
+host that switches its *chat* model constantly (e.g. an IDE assistant) doesn't
+affect Aegis at all, because Aegis only depends on the two models *it* is
+configured with. And if you outgrow Ollama, `IEmbeddingService` /
+`IFactExtractor` are ordinary interfaces — register a cloud-backed
+implementation before `AddAegisMemory()` and the rest of the stack is
+untouched.
+
+### One caveat: don't mix embedding spaces
+
+Vectors from different embedding models are not comparable — the backend is
+therefore chosen **once per process** (a startup probe), never per call. With
+in-memory storage that's the end of the story. With **SQLite persistence**,
+memories written by one embedding model are invisible to recall queries
+embedded by another (Aegis skips mismatched vectors rather than crash), so:
+
+- pin the backend explicitly (`Aegis:Ollama:Enabled`) on persistent
+  deployments, so a temporarily-stopped Ollama server can't flip you to the
+  hashing embedder; and
+- if you do switch embedding models, re-ingest (re-`remember`/`extract`) or
+  start a fresh database. Graph traversal and the audit log are unaffected —
+  only vector recall is embedding-specific.
 
 ## MCP server (REQ-1.2)
 
@@ -189,16 +274,17 @@ linked to their replacement) rather than removed.
 Every component is an interface registered with `TryAdd*`, so you override it by
 registering your own implementation **before** `AddAegisMemory()`:
 
-| Interface            | Default                    | Swap in…                              |
-|----------------------|----------------------------|---------------------------------------|
-| `IEmbeddingService`  | `HashingEmbeddingService`  | A transformer embedding model         |
-| `IFactExtractor`     | `RuleBasedFactExtractor`   | An LLM-based extraction pipeline       |
-| `IVectorStore`       | `InMemoryVectorStore`      | An ANN index (e.g. HNSW / pgvector)   |
-| `IGraphStore`        | `InMemoryGraphStore`       | A graph database                      |
-| `IBlobStore`         | `InMemoryBlobStore`        | Walrus / IPFS (or the SQLite store)   |
+| Interface            | Offline default            | Ships in this repo                     | Swap in…                              |
+|----------------------|----------------------------|----------------------------------------|---------------------------------------|
+| `IEmbeddingService`  | `HashingEmbeddingService`  | `OllamaEmbeddingService` (open-source model, no API key) | Any embedding model / API             |
+| `IFactExtractor`     | `RuleBasedFactExtractor`   | `OllamaFactExtractor` (open-weight LLM, no API key) | Any LLM extraction pipeline           |
+| `IVectorStore`       | `InMemoryVectorStore`      | `SqliteHybridStore`                    | An ANN index (e.g. HNSW / pgvector)   |
+| `IGraphStore`        | `InMemoryGraphStore`       | `SqliteHybridStore`                    | A graph database                      |
+| `IBlobStore`         | `InMemoryBlobStore`        | `SqliteBlobStore` (content-addressed)  | Walrus / IPFS                         |
 
-A ready-made persistent backend ships in `Aegis.Storage.Sqlite` — see
-[Persistence](#persistence).
+Ready-made backends ship in `Aegis.Models.Ollama` (see
+[Model backend](#model-backend-open-source-by-default)) and
+`Aegis.Storage.Sqlite` (see [Persistence](#persistence)).
 
 ## PRD traceability
 
@@ -207,7 +293,7 @@ A ready-made persistent backend ships in `Aegis.Storage.Sqlite` — see
 | REQ-1.1 Hierarchical scope (User/Agent/Session) | `Domain/MemoryScope.cs`, `Domain/Namespace.cs` |
 | REQ-1.2 SDK/MCP integration                     | `Aegis.Mcp` (Model Context Protocol server) + `Aegis.Api` (HTTP surface) |
 | REQ-1.3 Ed25519 request signing                 | `Security/Ed25519SignatureScheme.cs`, `Api/SignatureAuthMiddleware.cs` |
-| REQ-2.1 Automatic fact extraction               | `Extraction/RuleBasedFactExtractor.cs` |
+| REQ-2.1 Automatic fact extraction               | `Extraction/RuleBasedFactExtractor.cs` + `Aegis.Models.Ollama/OllamaFactExtractor.cs` (LLM, open-domain) |
 | REQ-2.2 Conflict resolution                     | `Engine/AegisMemoryEngine.StoreFactAsync` |
 | REQ-2.3 Edge encryption                          | `Security/AesGcmPayloadCipher.cs` |
 | REQ-3.1 Hybrid datastore (graph + vector)       | `Storage/InMemoryVectorStore.cs`, `Storage/InMemoryGraphStore.cs` |
@@ -218,6 +304,9 @@ A ready-made persistent backend ships in `Aegis.Storage.Sqlite` — see
 
 ## Open-source dependencies
 
+- [Ollama](https://github.com/ollama/ollama) (MIT) — local open-source model server (default model backend; talked to over plain HTTP, no client package needed)
+  - [nomic-embed-text](https://ollama.com/library/nomic-embed-text) (Apache-2.0) — default embedding model
+  - [llama3.2](https://ollama.com/library/llama3.2) (Llama 3.2 Community License, open weights) — default extraction model
 - [BouncyCastle.Cryptography](https://www.bouncycastle.org/) (MIT) — Ed25519
 - [ModelContextProtocol](https://github.com/modelcontextprotocol/csharp-sdk) (MIT) — MCP server SDK
 - [Microsoft.Data.Sqlite](https://learn.microsoft.com/dotnet/standard/data/sqlite/) (MIT) — persistent storage

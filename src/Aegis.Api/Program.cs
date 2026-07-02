@@ -2,6 +2,7 @@ using Aegis.Api;
 using Aegis.Core;
 using Aegis.Core.Abstractions;
 using Aegis.Core.Domain;
+using Aegis.Models.Ollama;
 using Aegis.Storage.Sqlite;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -15,6 +16,12 @@ builder.Services.AddSingleton(apiOptions);
 var sqlitePath = builder.Configuration["Aegis:Sqlite:Path"];
 if (!string.IsNullOrWhiteSpace(sqlitePath))
     builder.Services.AddAegisSqliteStorage(sqlitePath);
+
+// Free, open-source model backend (local Ollama) — enabled by default, no API
+// key needed. If no Ollama server is running, Aegis keeps its deterministic
+// offline components. Configure or disable via the Aegis:Ollama section.
+builder.Services.AddAegisOllamaModels(o =>
+    builder.Configuration.GetSection("Aegis:Ollama").Bind(o));
 
 // Register the Aegis memory layer. A master key may be supplied via
 // Aegis:MasterKeyBase64; otherwise an ephemeral key is generated.

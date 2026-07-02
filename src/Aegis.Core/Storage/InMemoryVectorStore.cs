@@ -36,6 +36,12 @@ public sealed class InMemoryVectorStore : IVectorStore
         var results = new List<(MemoryNode Node, double Similarity)>();
         foreach (var node in EnumerateActive(ns))
         {
+            // Vectors from a different embedding model (e.g. after switching
+            // between the hashing default and an Ollama model) live in an
+            // incompatible space; skip them rather than crash the recall.
+            if (node.Embedding.Length != queryEmbedding.Length)
+                continue;
+
             var sim = HashingEmbeddingService.CosineSimilarity(queryEmbedding, node.Embedding);
             results.Add((node, sim));
         }

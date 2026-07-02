@@ -2,15 +2,33 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
 
 namespace Aegis.Core.Tests;
 
-public class ApiIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public class ApiIntegrationTests : IClassFixture<ApiIntegrationTests.OfflineFactory>
 {
     private readonly HttpClient _client;
 
-    public ApiIntegrationTests(WebApplicationFactory<Program> factory) =>
+    public ApiIntegrationTests(OfflineFactory factory) =>
         _client = factory.CreateClient();
+
+    /// <summary>
+    /// Pins the deterministic offline components so results don't depend on
+    /// whether the developer machine happens to run an Ollama server.
+    /// </summary>
+    public sealed class OfflineFactory : WebApplicationFactory<Program>
+    {
+        protected override IHost CreateHost(IHostBuilder builder)
+        {
+            builder.ConfigureHostConfiguration(c => c.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Aegis:Ollama:Enabled"] = "false"
+            }));
+            return base.CreateHost(builder);
+        }
+    }
 
     [Fact]
     public async Task Health_returns_ok()

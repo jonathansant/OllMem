@@ -43,6 +43,9 @@ public sealed class SqliteHybridStore : IVectorStore, IGraphStore
     {
         var active = await ListActiveAsync(ns, ct);
         return active
+            // Rows embedded by a different model (different dimensionality) are
+            // in an incompatible vector space; skip them rather than crash.
+            .Where(n => n.Embedding.Length == queryEmbedding.Length)
             .Select(n => (Node: n, Similarity: HashingEmbeddingService.CosineSimilarity(queryEmbedding, n.Embedding)))
             .OrderByDescending(x => x.Similarity)
             .Take(Math.Max(0, topK))

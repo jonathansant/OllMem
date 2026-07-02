@@ -21,7 +21,8 @@ public class SignatureAuthTests : IClassFixture<SignatureAuthTests.SignedFactory
         {
             builder.ConfigureHostConfiguration(c => c.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Aegis:RequireSignature"] = "true"
+                ["Aegis:RequireSignature"] = "true",
+                ["Aegis:Ollama:Enabled"] = "false"
             }));
             return base.CreateHost(builder);
         }
