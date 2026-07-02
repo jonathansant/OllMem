@@ -1,5 +1,6 @@
 using Aegis.Core;
 using Aegis.Models.Ollama;
+using Aegis.Storage.Git;
 using Aegis.Storage.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -13,10 +14,25 @@ var builder = Host.CreateApplicationBuilder(args);
 // stdout is the MCP transport channel, so all logs must go to stderr.
 builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
 
-// Opt into persistent SQLite storage when AEGIS_SQLITE_PATH is set; otherwise
-// memory is in-process only. Registered before AddAegisMemory so it wins.
+// Opt into persistent storage, registered before AddAegisMemory so it wins.
+// AEGIS_GIT_PATH selects git-backed storage (set AEGIS_GIT_REMOTE to share the
+// memory across machines; AEGIS_GIT_BRANCH / AEGIS_GIT_SYNC_SECONDS tune it),
+// otherwise AEGIS_SQLITE_PATH selects SQLite; with neither set, memory is
+// in-process only.
+var gitPath = Environment.GetEnvironmentVariable("AEGIS_GIT_PATH");
 var sqlitePath = Environment.GetEnvironmentVariable("AEGIS_SQLITE_PATH");
-if (!string.IsNullOrWhiteSpace(sqlitePath))
+if (!string.IsNullOrWhiteSpace(gitPath))
+{
+    builder.Services.AddAegisGitStorage(o =>
+    {
+        o.Path = gitPath;
+        o.RemoteUrl = Environment.GetEnvironmentVariable("AEGIS_GIT_REMOTE");
+        o.Branch = Environment.GetEnvironmentVariable("AEGIS_GIT_BRANCH") ?? o.Branch;
+        if (int.TryParse(Environment.GetEnvironmentVariable("AEGIS_GIT_SYNC_SECONDS"), out var seconds))
+            o.SyncIntervalSeconds = seconds;
+    });
+}
+else if (!string.IsNullOrWhiteSpace(sqlitePath))
     builder.Services.AddAegisSqliteStorage(sqlitePath);
 
 // Free, open-source model backend (local Ollama) — enabled by default, no API
