@@ -1,15 +1,15 @@
 # Architecture
 
-Aegis is a hierarchical, verifiable memory layer for LLM agents, implemented
+OllMem is a hierarchical, verifiable memory layer for LLM agents, implemented
 in C# / .NET 10. This page explains how the solution is put together and how a
 fact flows through it.
 
 ## Solution layout
 
 ```
-Aegis.sln
+OllMem.sln
 ├─ src/
-│  ├─ Aegis.Core/                 Domain + all engine services (no web deps)
+│  ├─ OllMem.Core/                 Domain + all engine services (no web deps)
 │  │  ├─ Domain/                  MemoryNode, GraphEdge, Namespace, MemoryScope…
 │  │  ├─ Abstractions/            Interfaces for every swappable component
 │  │  ├─ Embeddings/              HashingEmbeddingService (deterministic, local)
@@ -17,25 +17,25 @@ Aegis.sln
 │  │  ├─ Extraction/              RuleBasedFactExtractor (auto fact extraction)
 │  │  ├─ Security/                Ed25519, AES-256-GCM cipher, hash-chained audit
 │  │  ├─ Retrieval/               SoftDecayScorer (decay + recency/usage weight)
-│  │  └─ Engine/                  AegisMemoryEngine (orchestrator)
-│  ├─ Aegis.Models.Ollama/        Model backend: local Ollama server (embeddings + extraction)
-│  ├─ Aegis.Storage.Git/          Git-synced persistent stores (shared memory across machines)
-│  ├─ Aegis.Storage.Sqlite/       SQLite-backed persistent stores
-│  ├─ Aegis.Api/                  ASP.NET Core minimal API + Ed25519 auth middleware
-│  └─ Aegis.Mcp/                  Model Context Protocol server (stdio) over the engine
+│  │  └─ Engine/                  OllMemMemoryEngine (orchestrator)
+│  ├─ OllMem.Models.Ollama/        Model backend: local Ollama server (embeddings + extraction)
+│  ├─ OllMem.Storage.Git/          Git-synced persistent stores (shared memory across machines)
+│  ├─ OllMem.Storage.Sqlite/       SQLite-backed persistent stores
+│  ├─ OllMem.Api/                  ASP.NET Core minimal API + Ed25519 auth middleware
+│  └─ OllMem.Mcp/                  Model Context Protocol server (stdio) over the engine
 └─ tests/
-   └─ Aegis.Core.Tests/           xUnit unit + API integration tests
+   └─ OllMem.Core.Tests/           xUnit unit + API integration tests
 ```
 
-`Aegis.Core` has no web or storage-technology dependencies; everything
+`OllMem.Core` has no web or storage-technology dependencies; everything
 technology-specific lives in the satellite projects and plugs in via DI.
 
 ## The component model: interfaces + `TryAdd*`
 
-Every swappable concern is an interface in `Aegis.Core/Abstractions`, and
-`AddAegisMemory()` registers its default implementation with
+Every swappable concern is an interface in `OllMem.Core/Abstractions`, and
+`AddOllMemMemory()` registers its default implementation with
 `TryAddSingleton`. That single convention is the whole extension mechanism:
-**whatever is registered *before* `AddAegisMemory()` wins**, and the rest of
+**whatever is registered *before* `AddOllMemMemory()` wins**, and the rest of
 the stack is untouched.
 
 | Interface | Role | Offline default | Ships in this repo |
@@ -49,16 +49,16 @@ the stack is untouched.
 | `IPayloadCipher` | per-namespace authenticated encryption | `AesGcmPayloadCipher` | — |
 | `ISignatureScheme` | ownership assertion (Ed25519) | `Ed25519SignatureScheme` | — |
 | `IDecayScorer` | non-destructive relevance decay | `SoftDecayScorer` | — |
-| `IMemoryEngine` | orchestrator over all of the above | `AegisMemoryEngine` | — |
+| `IMemoryEngine` | orchestrator over all of the above | `OllMemMemoryEngine` | — |
 
-Composition happens in the hosts (`Aegis.Api/Program.cs`,
-`Aegis.Mcp/Program.cs`):
+Composition happens in the hosts (`OllMem.Api/Program.cs`,
+`OllMem.Mcp/Program.cs`):
 
 ```csharp
 // Order matters: overrides first, core last.
-builder.Services.AddAegisGitStorage(...);      // or AddAegisSqliteStorage(...)
-builder.Services.AddAegisOllamaModels(...);    // model backend
-builder.Services.AddAegisMemory(o => { ... }); // fills every remaining slot with defaults
+builder.Services.AddOllMemGitStorage(...);      // or AddOllMemSqliteStorage(...)
+builder.Services.AddOllMemOllamaModels(...);    // model backend
+builder.Services.AddOllMemMemory(o => { ... }); // fills every remaining slot with defaults
 ```
 
 See [Extending models](extending-models.md) and
@@ -68,7 +68,7 @@ implementations.
 ## Life of a fact
 
 **Write path** (`RememberAsync` / `ExtractAndStoreAsync` in
-`Engine/AegisMemoryEngine.cs`):
+`Engine/OllMemMemoryEngine.cs`):
 
 1. `IFactExtractor` turns a transcript into `ExtractedFact`s (statement +
    subject/predicate/object edge). Explicit `remember` calls skip this step.
@@ -105,10 +105,10 @@ signing is enabled, the verified Ed25519 public key *becomes* the owner
 
 ## Tuning the engine
 
-`AddAegisMemory` accepts an options callback:
+`AddOllMemMemory` accepts an options callback:
 
 ```csharp
-builder.Services.AddAegisMemory(o =>
+builder.Services.AddOllMemMemory(o =>
 {
     o.MasterKeyBase64 = "...";        // 32-byte base64; null = ephemeral
     o.EmbeddingDimensions = 256;      // offline hashing embedder only
@@ -123,14 +123,14 @@ builder.Services.AddAegisMemory(o =>
 
 ## Hosts
 
-- **`Aegis.Api`** — ASP.NET Core minimal API (`/v1/remember`, `/v1/extract`,
+- **`OllMem.Api`** — ASP.NET Core minimal API (`/v1/remember`, `/v1/extract`,
   `/v1/recall`, `/v1/neighbors`, `/v1/audit`, `/v1/keypair`, `/health`) with
   optional Ed25519 signature middleware. `public partial class Program`
   exists so `WebApplicationFactory` can drive it in integration tests.
-- **`Aegis.Mcp`** — stdio MCP server built on the
+- **`OllMem.Mcp`** — stdio MCP server built on the
   [`ModelContextProtocol`](https://www.nuget.org/packages/ModelContextProtocol)
   C# SDK. Tools are declared as attributed static methods in
-  `AegisMemoryTools.cs`; `IMemoryEngine` is DI-injected, the remaining
+  `OllMemMemoryTools.cs`; `IMemoryEngine` is DI-injected, the remaining
   parameters become the tool's JSON schema. Logs go to stderr because stdout
   is the protocol channel.
 
@@ -139,16 +139,16 @@ builder.Services.AddAegisMemory(o =>
 | Requirement | Where it lives |
 |-------------|----------------|
 | REQ-1.1 Hierarchical scope (User/Agent/Session) | `Domain/MemoryScope.cs`, `Domain/Namespace.cs` |
-| REQ-1.2 SDK/MCP integration | `Aegis.Mcp` + `Aegis.Api` |
+| REQ-1.2 SDK/MCP integration | `OllMem.Mcp` + `OllMem.Api` |
 | REQ-1.3 Ed25519 request signing | `Security/Ed25519SignatureScheme.cs`, `Api/SignatureAuthMiddleware.cs` |
-| REQ-2.1 Automatic fact extraction | `Extraction/RuleBasedFactExtractor.cs`, `Aegis.Models.Ollama/OllamaFactExtractor.cs` |
-| REQ-2.2 Conflict resolution | `Engine/AegisMemoryEngine.StoreFactAsync` |
+| REQ-2.1 Automatic fact extraction | `Extraction/RuleBasedFactExtractor.cs`, `OllMem.Models.Ollama/OllamaFactExtractor.cs` |
+| REQ-2.2 Conflict resolution | `Engine/OllMemMemoryEngine.StoreFactAsync` |
 | REQ-2.3 Edge encryption | `Security/AesGcmPayloadCipher.cs` |
 | REQ-3.1 Hybrid datastore (graph + vector) | `Storage/InMemoryVectorStore.cs`, `Storage/InMemoryGraphStore.cs` |
-| REQ-3.2 Persistent blob storage | `Storage/InMemoryBlobStore.cs`, `Aegis.Storage.Sqlite/SqliteBlobStore.cs` |
+| REQ-3.2 Persistent blob storage | `Storage/InMemoryBlobStore.cs`, `OllMem.Storage.Sqlite/SqliteBlobStore.cs` |
 | REQ-3.3 Cryptographic audit logs | `Security/HashChainedAuditLog.cs` |
 | REQ-4.1 Soft-decay scoring | `Retrieval/SoftDecayScorer.cs` |
-| REQ-4.2 Time-aware reranking | `Engine/AegisMemoryEngine.RecallAsync` |
+| REQ-4.2 Time-aware reranking | `Engine/OllMemMemoryEngine.RecallAsync` |
 
 ## Open-source dependencies
 

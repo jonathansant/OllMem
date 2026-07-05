@@ -1,7 +1,7 @@
-# Using Aegis
+# Using OllMem
 
-Everything you can do with Aegis, with copy-paste examples. Start the server
-first (`dotnet run --project src/Aegis.Api`), then set the address used in
+Everything you can do with OllMem, with copy-paste examples. Start the server
+first (`dotnet run --project src/OllMem.Api`), then set the address used in
 the examples below:
 
 ```bash
@@ -38,12 +38,12 @@ curl -s -X POST $BASE/v1/remember -H 'Content-Type: application/json' -d '{
 ```
 
 `subject`/`predicate`/`object` are optional. They're the little arrow for the
-knowledge graph (`user → prefers → dark mode`) — include them and Aegis can
+knowledge graph (`user → prefers → dark mode`) — include them and OllMem can
 also *update* this fact later when it changes.
 
-## Let Aegis find the facts (`/v1/extract`)
+## Let OllMem find the facts (`/v1/extract`)
 
-Paste in a raw conversation; Aegis picks out the facts on its own:
+Paste in a raw conversation; OllMem picks out the facts on its own:
 
 ```bash
 curl -s -X POST $BASE/v1/extract -H 'Content-Type: application/json' -d '{
@@ -52,7 +52,7 @@ curl -s -X POST $BASE/v1/extract -H 'Content-Type: application/json' -d '{
 }'
 ```
 
-Write the person's lines as `User: ...` so Aegis knows whose words to trust.
+Write the person's lines as `User: ...` so OllMem knows whose words to trust.
 
 ### Facts that change
 
@@ -89,7 +89,7 @@ Each result comes with three scores:
 
 ## Explore the knowledge graph (`/v1/neighbors`)
 
-See everything Aegis currently believes about an entity:
+See everything OllMem currently believes about an entity:
 
 ```bash
 curl -s "$BASE/v1/neighbors?owner=demo&scope=user&scopeId=u1&subject=user"
@@ -124,28 +124,28 @@ chain visibly.
 
 ## Give your AI assistant a memory (MCP)
 
-Aegis also speaks **MCP** (Model Context Protocol) — the standard plug that
+OllMem also speaks **MCP** (Model Context Protocol) — the standard plug that
 AI tools like Claude Desktop use. Register it once and your assistant gets
 four memory tools with zero extra code:
 
 | Tool | What the assistant can do with it |
 |------|-----------------------------------|
-| `aegis_remember` | Save one fact |
-| `aegis_extract` | Save all facts from a conversation |
-| `aegis_recall` | Look up relevant memories |
-| `aegis_neighbors` | Browse what it knows about something |
+| `ollmem_remember` | Save one fact |
+| `ollmem_extract` | Save all facts from a conversation |
+| `ollmem_recall` | Look up relevant memories |
+| `ollmem_neighbors` | Browse what it knows about something |
 
 For Claude Desktop, add this to `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
-    "aegis": {
+    "ollmem": {
       "command": "dotnet",
-      "args": ["run", "--project", "/abs/path/to/src/Aegis.Mcp"],
+      "args": ["run", "--project", "/abs/path/to/src/OllMem.Mcp"],
       "env": {
-        "AEGIS_SQLITE_PATH": "/abs/path/to/aegis.db",
-        "AEGIS_MASTER_KEY_BASE64": "<a 32-byte base64 key — keep it!>"
+        "OLLMEM_SQLITE_PATH": "/abs/path/to/ollmem.db",
+        "OLLMEM_MASTER_KEY_BASE64": "<a 32-byte base64 key — keep it!>"
       }
     }
   }

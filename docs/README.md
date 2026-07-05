@@ -1,17 +1,17 @@
-# Aegis documentation
+# OllMem documentation
 
 Welcome! The docs are split into two parts, depending on who you are:
 
-## 🙋 I want to *use* Aegis
+## 🙋 I want to *use* OllMem
 
 Simple guides — no prior knowledge needed:
 
-1. [What is Aegis?](user-guide/what-is-aegis.md) — what it does, explained simply
+1. [What is OllMem?](user-guide/what-is-ollmem.md) — what it does, explained simply
 2. [Getting started](user-guide/getting-started.md) — install it and store your first memory in 5 minutes
-3. [Using Aegis](user-guide/usage.md) — everything you can do: remember, extract, recall, explore
+3. [Using OllMem](user-guide/usage.md) — everything you can do: remember, extract, recall, explore
 4. [Configuration](user-guide/configuration.md) — every setting, what it does, and when to change it
 
-## 🛠️ I want to *build on* or *extend* Aegis
+## 🛠️ I want to *build on* or *extend* OllMem
 
 Technical guides for developers:
 
@@ -24,7 +24,7 @@ Technical guides for developers:
 | I want to… | Read this |
 |------------|-----------|
 | Run the HTTP API | [Getting started](user-guide/getting-started.md) |
-| Give Claude Desktop (or any MCP client) a memory | [Using Aegis → MCP server](user-guide/usage.md#give-your-ai-assistant-a-memory-mcp) |
+| Give Claude Desktop (or any MCP client) a memory | [Using OllMem → MCP server](user-guide/usage.md#give-your-ai-assistant-a-memory-mcp) |
 | Keep memories after a restart | [Configuration → Persistence](user-guide/configuration.md#keeping-memories-forever-persistence) |
 | Share one memory across all my machines | [Configuration → Git storage](user-guide/configuration.md#git-storage--one-memory-on-all-your-machines) |
 | Use a different Ollama model | [Configuration → Models](user-guide/configuration.md#the-brain-model-settings) |

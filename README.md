@@ -1,12 +1,12 @@
-# Aegis v2 — Portable AI Memory Layer
+# OllMem v2 — Portable AI Memory Layer
 
 An autonomous, hierarchical, verifiable memory layer for LLM agents,
-implemented in **C# / .NET 10**. Aegis bridges volatile agent sessions with
+implemented in **C# / .NET 10**. OllMem bridges volatile agent sessions with
 durable storage using a **hybrid datastore** (knowledge graph + vector index),
 automatic fact extraction, conflict resolution, client-side encryption, and
 time-aware reranking.
 
-**Free and open-source by default:** Aegis talks to a local
+**Free and open-source by default:** OllMem talks to a local
 [Ollama](https://ollama.com) server for real semantic embeddings and LLM fact
 extraction — no API key, no cloud account, no per-token cost. If no Ollama
 server is running, every component falls back to a deterministic in-process
@@ -19,7 +19,7 @@ implementation, so the build always works fully offline (tests, CI, demos).
 dotnet test
 
 # Run the API (listens on http://localhost:5021 by default)
-dotnet run --project src/Aegis.Api
+dotnet run --project src/OllMem.Api
 
 # Store a memory and recall it
 curl -s -X POST http://localhost:5021/v1/extract -H 'Content-Type: application/json' -d '{
@@ -38,9 +38,9 @@ curl -s -X POST http://localhost:5021/v1/recall -H 'Content-Type: application/js
 
 For users (simple, no prior knowledge needed):
 
-- [What is Aegis?](docs/user-guide/what-is-aegis.md) — what it does, in plain words
+- [What is OllMem?](docs/user-guide/what-is-ollmem.md) — what it does, in plain words
 - [Getting started](docs/user-guide/getting-started.md) — running in 5 minutes
-- [Using Aegis](docs/user-guide/usage.md) — the HTTP API and the MCP server (Claude Desktop etc.)
+- [Using OllMem](docs/user-guide/usage.md) — the HTTP API and the MCP server (Claude Desktop etc.)
 - [Configuration](docs/user-guide/configuration.md) — persistence (SQLite / git-synced shared memory), models, encryption, request signing
 
 For developers:
@@ -66,14 +66,14 @@ For developers:
 ## Solution layout
 
 ```
-Aegis.sln
+OllMem.sln
 ├─ src/
-│  ├─ Aegis.Core/            Domain + engine services (no web deps)
-│  ├─ Aegis.Models.Ollama/   Free open-source model backend (local Ollama)
-│  ├─ Aegis.Storage.Git/     Git-synced persistent stores (shared memory, opt-in)
-│  ├─ Aegis.Storage.Sqlite/  SQLite persistent stores (opt-in)
-│  ├─ Aegis.Api/             ASP.NET Core minimal API + Ed25519 auth
-│  └─ Aegis.Mcp/             Model Context Protocol server (stdio)
+│  ├─ OllMem.Core/            Domain + engine services (no web deps)
+│  ├─ OllMem.Models.Ollama/   Free open-source model backend (local Ollama)
+│  ├─ OllMem.Storage.Git/     Git-synced persistent stores (shared memory, opt-in)
+│  ├─ OllMem.Storage.Sqlite/  SQLite persistent stores (opt-in)
+│  ├─ OllMem.Api/             ASP.NET Core minimal API + Ed25519 auth
+│  └─ OllMem.Mcp/             Model Context Protocol server (stdio)
 └─ tests/
-   └─ Aegis.Core.Tests/      xUnit unit + API integration tests
+   └─ OllMem.Core.Tests/      xUnit unit + API integration tests
 ```
