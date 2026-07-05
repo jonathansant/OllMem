@@ -1,6 +1,6 @@
 # Extending the model backend
 
-Aegis needs models for two jobs, each behind one small interface:
+OllMem needs models for two jobs, each behind one small interface:
 
 | Job | Interface | Offline default | Shipped backend |
 |-----|-----------|-----------------|-----------------|
@@ -9,7 +9,7 @@ Aegis needs models for two jobs, each behind one small interface:
 
 Because the core registers its defaults with `TryAdd*`, replacing a model
 backend is always the same move: **register your implementation before
-`AddAegisMemory()`**. No other code changes.
+`AddOllMemMemory()`**. No other code changes.
 
 ## First: do you even need code?
 
@@ -25,7 +25,7 @@ gateway, etc.
 
 ## Custom embedding service
 
-The contract (`Aegis.Core/Abstractions/IEmbeddingService.cs`):
+The contract (`OllMem.Core/Abstractions/IEmbeddingService.cs`):
 
 ```csharp
 public interface IEmbeddingService
@@ -67,25 +67,25 @@ Register it (order matters):
 
 ```csharp
 builder.Services.AddSingleton<IEmbeddingService, MyCloudEmbeddingService>();
-// builder.Services.AddAegisOllamaModels(...);  // optional; TryAdd — yours already won
-builder.Services.AddAegisMemory();
+// builder.Services.AddOllMemOllamaModels(...);  // optional; TryAdd — yours already won
+builder.Services.AddOllMemMemory();
 ```
 
 ### The one rule: one embedding space per database
 
 Vectors from different models (or the same model with different dimensions)
-are not comparable. Aegis chooses the embedding backend **once per process**
+are not comparable. OllMem chooses the embedding backend **once per process**
 and, on persistent storage, silently skips stored vectors whose length doesn't
 match the active model. So:
 
 - Never let the backend flip implicitly under a persistent store (this is why
-  `AddAegisOllamaModels` probes once at startup instead of per call).
+  `AddOllMemOllamaModels` probes once at startup instead of per call).
 - If you migrate models, re-ingest the data or start a fresh store. Graph
   traversal and the audit log are embedding-agnostic and survive any switch.
 
 ## Custom fact extractor
 
-The contract (`Aegis.Core/Abstractions/IFactExtractor.cs`):
+The contract (`OllMem.Core/Abstractions/IFactExtractor.cs`):
 
 ```csharp
 public readonly record struct ExtractedFact(string Statement, GraphEdge Edge);
@@ -143,18 +143,18 @@ builder.Services.AddSingleton<IFactExtractor>(sp => new MyLlmFactExtractor(
     sp.GetRequiredService<MyLlmClient>(),
     new RuleBasedFactExtractor(),
     sp.GetService<ILogger<MyLlmFactExtractor>>()));
-builder.Services.AddAegisMemory();
+builder.Services.AddOllMemMemory();
 ```
 
 ## Packaging a backend
 
-Mirror `Aegis.Models.Ollama` if you want your backend reusable:
+Mirror `OllMem.Models.Ollama` if you want your backend reusable:
 
 - One options class (`MyBackendOptions`) with sensible defaults.
-- One `AddAegisMyBackendModels(this IServiceCollection, Action<Options>?)`
+- One `AddOllMemMyBackendModels(this IServiceCollection, Action<Options>?)`
   extension that registers via `TryAddSingleton` — so *it* can in turn be
-  overridden — and documents that it must be called before `AddAegisMemory()`.
+  overridden — and documents that it must be called before `AddOllMemMemory()`.
 - Decide your availability strategy explicitly: probe **once** for embeddings
   (vector-space integrity), fall back **per call** for extraction.
-- `tests/Aegis.Core.Tests/OllamaModelTests.cs` shows how to test the
+- `tests/OllMem.Core.Tests/OllamaModelTests.cs` shows how to test the
   fallback behaviour without a live server.

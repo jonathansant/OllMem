@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\OllMem.Core\OllMem.Core.csproj" />
+    <ProjectReference Include="..\OllMem.Models.Ollama\OllMem.Models.Ollama.csproj" />
+    <ProjectReference Include="..\OllMem.Storage.Git\OllMem.Storage.Git.csproj" />
+    <ProjectReference Include="..\OllMem.Storage.Sqlite\OllMem.Storage.Sqlite.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+</Project>

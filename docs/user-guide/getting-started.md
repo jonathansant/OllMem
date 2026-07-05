@@ -7,13 +7,13 @@ Five minutes from zero to your first stored memory.
 - [.NET 10 SDK](https://dotnet.microsoft.com/download) — the thing that builds
   and runs the project.
 - *(Optional but recommended)* [Ollama](https://ollama.com/download) — a free
-  program that runs open-source AI models on your computer. Aegis works
+  program that runs open-source AI models on your computer. OllMem works
   without it, but with it the memory becomes much smarter
   (see [why](#2-optional-make-it-smart-with-ollama)).
 
 ## 2. (Optional) Make it smart with Ollama
 
-Without Ollama, Aegis matches memories by keywords ("Berlin" only matches
+Without Ollama, OllMem matches memories by keywords ("Berlin" only matches
 "Berlin"). With Ollama, it matches by **meaning** ("where is my home?" finds
 "lives in Berlin"). Two commands:
 
@@ -22,17 +22,17 @@ ollama pull nomic-embed-text   # understands what sentences mean (~270 MB)
 ollama pull llama3.2           # reads conversations and finds facts (~2 GB)
 ```
 
-That's it — Aegis finds the Ollama server automatically when it starts. No
+That's it — OllMem finds the Ollama server automatically when it starts. No
 API key, no account, no cost.
 
-## 3. Run Aegis
+## 3. Run OllMem
 
 ```bash
 # Check everything works (all tests run offline)
 dotnet test
 
 # Start the memory server (listens on http://localhost:5021)
-dotnet run --project src/Aegis.Api
+dotnet run --project src/OllMem.Api
 ```
 
 Watch the startup log: it either says `Ollama detected …` (smart mode) or
@@ -49,25 +49,25 @@ warns that it fell back to the built-in offline mode. Both are fine.
 ```bash
 BASE=http://localhost:5021
 
-# Tell Aegis about a conversation — it extracts the facts by itself
+# Tell OllMem about a conversation — it extracts the facts by itself
 curl -s -X POST $BASE/v1/extract -H 'Content-Type: application/json' -d '{
   "owner":"demo","scope":"user","scopeId":"u1",
   "transcript":"User: Hi, I live in Berlin and I work at Acme. I love cycling."
 }'
 
-# Ask a question — Aegis finds the right memory by meaning
+# Ask a question — OllMem finds the right memory by meaning
 curl -s -X POST $BASE/v1/recall -H 'Content-Type: application/json' -d '{
   "owner":"demo","scope":"user","scopeId":"u1",
   "query":"where does the user live","topK":3
 }'
 ```
 
-You just watched Aegis read a conversation, save the facts, and answer a
+You just watched OllMem read a conversation, save the facts, and answer a
 question about them. 🎉
 
 ## 5. What next?
 
-- [Using Aegis](usage.md) — everything else it can do (updating facts, the
+- [Using OllMem](usage.md) — everything else it can do (updating facts, the
   knowledge graph, the audit log, plugging it into Claude Desktop).
 - [Configuration](configuration.md) — keep memories forever, share them
   across machines, switch models, turn on security.

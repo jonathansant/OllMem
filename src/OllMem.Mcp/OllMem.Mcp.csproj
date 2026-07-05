@@ -1,0 +1,22 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\OllMem.Core\OllMem.Core.csproj" />
+    <ProjectReference Include="..\OllMem.Models.Ollama\OllMem.Models.Ollama.csproj" />
+    <ProjectReference Include="..\OllMem.Storage.Git\OllMem.Storage.Git.csproj" />
+    <ProjectReference Include="..\OllMem.Storage.Sqlite\OllMem.Storage.Sqlite.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.9" />
+    <PackageReference Include="ModelContextProtocol" Version="1.4.0" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

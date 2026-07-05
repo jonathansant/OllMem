@@ -12,12 +12,12 @@ crib from:
 | `IAuditLog` | append-only hash chain | `HashChainedAuditLog` | `SqliteAuditLog` | `GitAuditLog` | an external ledger |
 
 As with models, the mechanism is DI ordering: the core registers defaults with
-`TryAdd*`, so **register your stores before `AddAegisMemory()`** and they
+`TryAdd*`, so **register your stores before `AddOllMemMemory()`** and they
 replace the in-memory ones transparently.
 
 ```csharp
-builder.Services.AddAegisMyStorage(...);   // yours first
-builder.Services.AddAegisMemory();         // core fills the remaining slots
+builder.Services.AddOllMemMyStorage(...);   // yours first
+builder.Services.AddOllMemMemory();         // core fills the remaining slots
 ```
 
 You don't have to implement all four — provide any subset and the defaults
@@ -138,16 +138,16 @@ Contract notes:
 
 ## Packaging a backend
 
-Follow `Aegis.Storage.Sqlite` (simple) or `Aegis.Storage.Git` (advanced —
+Follow `OllMem.Storage.Sqlite` (simple) or `OllMem.Storage.Git` (advanced —
 options class, background sync, hosted-service lifecycle):
 
-- One `AddAegisMyStorage(...)` extension registering everything with
-  `TryAdd*`, documented as "call before `AddAegisMemory()`".
+- One `AddOllMemMyStorage(...)` extension registering everything with
+  `TryAdd*`, documented as "call before `AddOllMemMemory()`".
 - Wire configuration in the hosts the way the existing backends do
-  (`Aegis.Api/Program.cs` binds an `Aegis:*` section; `Aegis.Mcp/Program.cs`
-  reads `AEGIS_*` environment variables).
+  (`OllMem.Api/Program.cs` binds an `OllMem:*` section; `OllMem.Mcp/Program.cs`
+  reads `OLLMEM_*` environment variables).
 - Reuse the test suites: `SqlitePersistenceTests.cs` and
-  `GitPersistenceTests.cs` in `tests/Aegis.Core.Tests` exercise the full
+  `GitPersistenceTests.cs` in `tests/OllMem.Core.Tests` exercise the full
   store contract (persistence across restarts, supersede consistency,
   dimension-mismatch skipping, audit-chain integrity) and adapt readily to a
   new backend.

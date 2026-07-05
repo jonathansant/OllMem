@@ -23,8 +23,8 @@ coverage*.xml
 Thumbs.db
 
 ## Local data (encrypted blobs / dev state)
-*.aegisdb
-.aegis-data/
+*.ollmemdb
+.ollmem-data/
 data/
 *.db
 *.db-wal
