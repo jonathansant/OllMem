@@ -17,10 +17,14 @@ implementation, so the build always works fully offline (tests, CI, demos).
 **Guided install** — one script asks how you want to use OllMem (MCP or HTTP
 API), which matching to use (simple or LLM via Ollama), where memories should
 live (SQLite / git-synced / in-memory), then installs dependencies, builds
-everything, and writes the configuration for you:
+everything, writes the configuration, smoke-tests the result, and can register
+the MCP server with Claude Desktop, Claude Code, Cursor, VS Code (GitHub
+Copilot), the GitHub Copilot CLI/desktop app, and the Gemini CLI:
 
 ```bash
-./install.sh
+./install.sh              # interactive
+./install.sh --help       # every question is also a flag; --yes never prompts
+./install.sh --uninstall  # removes it again
 ```
 
 Or by hand:
