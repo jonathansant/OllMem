@@ -2,6 +2,13 @@
 
 Five minutes from zero to your first stored memory.
 
+> **Prefer a guided setup?** Run `./install.sh` from the repository root. It
+> asks how you want to use OllMem (MCP server or HTTP API), whether to use
+> simple or LLM matching (Ollama), and where memories should live (SQLite,
+> git-synced, or in-memory) — then installs the dependencies, builds OllMem,
+> generates the master encryption key, and writes all configuration and
+> launchers into `~/.ollmem`. The steps below do the same thing by hand.
+
 ## 1. What you need
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download) — the thing that builds

@@ -14,6 +14,17 @@ implementation, so the build always works fully offline (tests, CI, demos).
 
 ## Quick start
 
+**Guided install** — one script asks how you want to use OllMem (MCP or HTTP
+API), which matching to use (simple or LLM via Ollama), where memories should
+live (SQLite / git-synced / in-memory), then installs dependencies, builds
+everything, and writes the configuration for you:
+
+```bash
+./install.sh
+```
+
+Or by hand:
+
 ```bash
 # Build & test (all offline — no model or API key needed)
 dotnet test
