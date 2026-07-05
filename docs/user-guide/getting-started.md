@@ -1,0 +1,73 @@
+# Getting started
+
+Five minutes from zero to your first stored memory.
+
+## 1. What you need
+
+- [.NET 10 SDK](https://dotnet.microsoft.com/download) — the thing that builds
+  and runs the project.
+- *(Optional but recommended)* [Ollama](https://ollama.com/download) — a free
+  program that runs open-source AI models on your computer. Aegis works
+  without it, but with it the memory becomes much smarter
+  (see [why](#2-optional-make-it-smart-with-ollama)).
+
+## 2. (Optional) Make it smart with Ollama
+
+Without Ollama, Aegis matches memories by keywords ("Berlin" only matches
+"Berlin"). With Ollama, it matches by **meaning** ("where is my home?" finds
+"lives in Berlin"). Two commands:
+
+```bash
+ollama pull nomic-embed-text   # understands what sentences mean (~270 MB)
+ollama pull llama3.2           # reads conversations and finds facts (~2 GB)
+```
+
+That's it — Aegis finds the Ollama server automatically when it starts. No
+API key, no account, no cost.
+
+## 3. Run Aegis
+
+```bash
+# Check everything works (all tests run offline)
+dotnet test
+
+# Start the memory server (listens on http://localhost:5021)
+dotnet run --project src/Aegis.Api
+```
+
+Watch the startup log: it either says `Ollama detected …` (smart mode) or
+warns that it fell back to the built-in offline mode. Both are fine.
+
+> ⚠️ **Heads-up:** with no other settings, memories live in RAM and are
+> encrypted with a temporary key — **everything is forgotten when you stop the
+> server**. That's perfect for trying things out. When you want memories to
+> survive restarts, see
+> [Configuration → Persistence](configuration.md#keeping-memories-forever-persistence).
+
+## 4. Store and recall your first memory
+
+```bash
+BASE=http://localhost:5021
+
+# Tell Aegis about a conversation — it extracts the facts by itself
+curl -s -X POST $BASE/v1/extract -H 'Content-Type: application/json' -d '{
+  "owner":"demo","scope":"user","scopeId":"u1",
+  "transcript":"User: Hi, I live in Berlin and I work at Acme. I love cycling."
+}'
+
+# Ask a question — Aegis finds the right memory by meaning
+curl -s -X POST $BASE/v1/recall -H 'Content-Type: application/json' -d '{
+  "owner":"demo","scope":"user","scopeId":"u1",
+  "query":"where does the user live","topK":3
+}'
+```
+
+You just watched Aegis read a conversation, save the facts, and answer a
+question about them. 🎉
+
+## 5. What next?
+
+- [Using Aegis](usage.md) — everything else it can do (updating facts, the
+  knowledge graph, the audit log, plugging it into Claude Desktop).
+- [Configuration](configuration.md) — keep memories forever, share them
+  across machines, switch models, turn on security.
