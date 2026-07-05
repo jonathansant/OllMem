@@ -31,6 +31,7 @@ Aegis.sln
 │  │  ├─ Retrieval/               SoftDecayScorer (decay + recency/usage weight)
 │  │  └─ Engine/                  AegisMemoryEngine (orchestrator)
 │  ├─ Aegis.Models.Ollama/        Free open-source model backend (local Ollama server)
+│  ├─ Aegis.Storage.Git/          Git-synced persistent stores — shared memory across machines (opt-in)
 │  ├─ Aegis.Storage.Sqlite/       SQLite-backed persistent stores (opt-in)
 │  ├─ Aegis.Api/                  ASP.NET Core minimal API + Ed25519 auth middleware
 │  └─ Aegis.Mcp/                  Model Context Protocol server (stdio) over the engine
@@ -41,7 +42,7 @@ Aegis.sln
 ## Quick start
 
 ```bash
-# Build & test (49 tests, all offline — no model or API key needed)
+# Build & test (55 tests, all offline — no model or API key needed)
 dotnet test
 
 # Run the API (listens on http://localhost:5021 by default)
@@ -80,11 +81,20 @@ curl -s "$BASE/v1/audit?owner=demo&scope=user&scopeId=u1"
 
 ## Persistence
 
-By default everything is in-memory (great for tests and demos). To persist
-across restarts, opt into the **SQLite** store (`Aegis.Storage.Sqlite`, built on
-the open-source `Microsoft.Data.Sqlite`). One `memories` table backs both the
-vector index and the knowledge graph, so superseding a fact removes it from both
-views atomically; blobs and the hash-chained audit log get their own tables.
+By default everything is in-memory (great for tests and demos). Two opt-in
+persistent backends ship in this repo:
+
+- **Git** (`Aegis.Storage.Git`) — memory as plain files in a git repository,
+  synced with a remote so **all your machines, devices and agents share one
+  memory** ([details](#git-synced-persistence-shared-memory-across-machines)).
+- **SQLite** (`Aegis.Storage.Sqlite`) — a single local database file.
+
+### SQLite
+
+Built on the open-source `Microsoft.Data.Sqlite`. One `memories` table backs
+both the vector index and the knowledge graph, so superseding a fact removes it
+from both views atomically; blobs and the hash-chained audit log get their own
+tables.
 
 ```bash
 # API
@@ -101,6 +111,65 @@ because the core uses `TryAdd*`, the SQLite stores transparently replace the
 in-memory defaults. Supply a stable `MasterKeyBase64` so encrypted blobs stay
 readable across restarts. Set the WAL files (`*.db-wal`, `*.db-shm`) and the
 `.db` aside from source control (already covered by `.gitignore`).
+
+### Git-synced persistence (shared memory across machines)
+
+`Aegis.Storage.Git` persists memory as plain files inside a **dedicated git
+repository** and syncs it with a remote. Point every machine, device or agent
+at the same remote (a private GitHub/GitLab repo, a bare repo on a server or
+NAS — any URL `git` accepts) and they all read and write **one shared memory**.
+There is no server to run and no new credentials to manage: the store shells
+out to the machine's own `git`, so SSH keys and credential helpers you already
+use just work. Payloads stay encrypted at rest (blobs are ciphertext files),
+and the memory's history is, quite literally, `git log`.
+
+```bash
+# API — first machine creates the memory repo, every other machine clones it
+Aegis__Git__Path=~/.aegis/memory \
+Aegis__Git__RemoteUrl=git@github.com:you/aegis-memory.git \
+Aegis__MasterKeyBase64=<same 32-byte base64 key on every machine> \
+  dotnet run --project src/Aegis.Api
+
+# MCP server
+AEGIS_GIT_PATH=~/.aegis/memory \
+AEGIS_GIT_REMOTE=git@github.com:you/aegis-memory.git \
+AEGIS_MASTER_KEY_BASE64=<same key> \
+  dotnet run --project src/Aegis.Mcp
+```
+
+How it works:
+
+- **Layout.** One JSON document per memory node
+  (`nodes/<owner>/<scope>/<scopeId>/<id>.json`), content-addressed encrypted
+  blobs (`blobs/<xx>/<sha256>`), and one append-only hash-chained audit file
+  per machine (`audit/<writer-id>.jsonl`).
+- **Writes** land on disk immediately (durability never waits for the
+  network), are committed after a short debounce so one logical operation is
+  one commit, and are pushed/pulled by a background sync
+  (`SyncIntervalSeconds`, default 60s). Offline? Everything keeps working
+  locally; the next successful sync catches the remote up.
+- **Conflicts** are engineered away where possible and merged where not: two
+  machines only touch the same file when they modified the *same* memory, and
+  those conflicts are resolved field-wise (a supersede on either side wins,
+  usage stats take the maximum). Blob files are content-addressed so they can
+  never conflict, and each machine appends only to its own audit chain, so
+  every chain stays verifiable end to end.
+
+Configuration (API `Aegis:Git:*` section; MCP `AEGIS_GIT_*` env vars):
+
+| Setting | Default | Purpose |
+|---------|---------|---------|
+| `Path` / `AEGIS_GIT_PATH` | — (required) | Local working directory of the memory repo |
+| `RemoteUrl` / `AEGIS_GIT_REMOTE` | none | Remote to sync with; omit for local-only versioned memory |
+| `Branch` / `AEGIS_GIT_BRANCH` | `main` | Branch carrying the memory |
+| `SyncIntervalSeconds` / `AEGIS_GIT_SYNC_SECONDS` | `60` | Background commit+pull+push cadence (`0` = startup/dispose only) |
+| `CommitDebounceMs` | `2000` | Quiet period before pending writes are committed |
+
+Use the **same `MasterKeyBase64` on every machine** (otherwise encrypted blobs
+written elsewhere aren't decryptable), pin the embedding backend as described
+[below](#one-caveat-dont-mix-embedding-spaces), and make the remote **private**
+— it holds your agent's memory. When both `Aegis:Git:Path` and
+`Aegis:Sqlite:Path` are configured, git wins.
 
 ## Model backend: open-source by default
 
@@ -171,8 +240,8 @@ untouched.
 
 Vectors from different embedding models are not comparable — the backend is
 therefore chosen **once per process** (a startup probe), never per call. With
-in-memory storage that's the end of the story. With **SQLite persistence**,
-memories written by one embedding model are invisible to recall queries
+in-memory storage that's the end of the story. With **persistent storage
+(SQLite or git)**, memories written by one embedding model are invisible to recall queries
 embedded by another (Aegis skips mismatched vectors rather than crash), so:
 
 - pin the backend explicitly (`Aegis:Ollama:Enabled`) on persistent
@@ -278,13 +347,14 @@ registering your own implementation **before** `AddAegisMemory()`:
 |----------------------|----------------------------|----------------------------------------|---------------------------------------|
 | `IEmbeddingService`  | `HashingEmbeddingService`  | `OllamaEmbeddingService` (open-source model, no API key) | Any embedding model / API             |
 | `IFactExtractor`     | `RuleBasedFactExtractor`   | `OllamaFactExtractor` (open-weight LLM, no API key) | Any LLM extraction pipeline           |
-| `IVectorStore`       | `InMemoryVectorStore`      | `SqliteHybridStore`                    | An ANN index (e.g. HNSW / pgvector)   |
-| `IGraphStore`        | `InMemoryGraphStore`       | `SqliteHybridStore`                    | A graph database                      |
-| `IBlobStore`         | `InMemoryBlobStore`        | `SqliteBlobStore` (content-addressed)  | Walrus / IPFS                         |
+| `IVectorStore`       | `InMemoryVectorStore`      | `SqliteHybridStore`, `GitHybridStore`  | An ANN index (e.g. HNSW / pgvector)   |
+| `IGraphStore`        | `InMemoryGraphStore`       | `SqliteHybridStore`, `GitHybridStore`  | A graph database                      |
+| `IBlobStore`         | `InMemoryBlobStore`        | `SqliteBlobStore`, `GitBlobStore` (content-addressed) | Walrus / IPFS          |
+| `IAuditLog`          | `HashChainedAuditLog`      | `SqliteAuditLog`, `GitAuditLog` (per-machine chains) | An external ledger      |
 
 Ready-made backends ship in `Aegis.Models.Ollama` (see
-[Model backend](#model-backend-open-source-by-default)) and
-`Aegis.Storage.Sqlite` (see [Persistence](#persistence)).
+[Model backend](#model-backend-open-source-by-default)), `Aegis.Storage.Git`
+and `Aegis.Storage.Sqlite` (see [Persistence](#persistence)).
 
 ## PRD traceability
 

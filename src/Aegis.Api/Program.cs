@@ -3,6 +3,7 @@ using Aegis.Core;
 using Aegis.Core.Abstractions;
 using Aegis.Core.Domain;
 using Aegis.Models.Ollama;
+using Aegis.Storage.Git;
 using Aegis.Storage.Sqlite;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -11,10 +12,15 @@ var builder = WebApplication.CreateBuilder(args);
 var apiOptions = builder.Configuration.GetSection("Aegis").Get<AegisApiOptions>() ?? new AegisApiOptions();
 builder.Services.AddSingleton(apiOptions);
 
-// Opt into persistent SQLite storage when Aegis:Sqlite:Path is configured.
-// Registered before AddAegisMemory so its TryAdd defaults don't take effect.
+// Opt into persistent storage, registered before AddAegisMemory so its TryAdd
+// defaults don't take effect: git-synced storage when Aegis:Git:Path is
+// configured (shared memory across machines via Aegis:Git:RemoteUrl),
+// otherwise SQLite when Aegis:Sqlite:Path is configured.
+var gitSection = builder.Configuration.GetSection("Aegis:Git");
 var sqlitePath = builder.Configuration["Aegis:Sqlite:Path"];
-if (!string.IsNullOrWhiteSpace(sqlitePath))
+if (!string.IsNullOrWhiteSpace(gitSection["Path"]))
+    builder.Services.AddAegisGitStorage(o => gitSection.Bind(o));
+else if (!string.IsNullOrWhiteSpace(sqlitePath))
     builder.Services.AddAegisSqliteStorage(sqlitePath);
 
 // Free, open-source model backend (local Ollama) — enabled by default, no API
