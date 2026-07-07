@@ -452,38 +452,88 @@ case "$PERSISTENCE" in
     mkdir -p "$(dirname -- "$SQLITE_PATH")"
     ;;
   2)
+    command -v git >/dev/null 2>&1 \
+      || die "git-synced persistence needs git — install it with your package manager and re-run"
     GIT_PATH=$OPT_GIT_PATH
     [ -n "$GIT_PATH" ] || ask GIT_PATH "Local folder for the memory repo" "$PREFIX/memory"
     expand_tilde GIT_PATH
-    GIT_REMOTE=$OPT_GIT_REMOTE
-    if [ -z "$GIT_REMOTE" ] && ! $NONINTERACTIVE; then
+
+    # Prompts for the remote URL and, for http(s) remotes, offers to embed a
+    # personal access token — preserving whichever scheme the URL uses.
+    ask_git_remote() {
       note "Give a remote (private!) repo URL to share memory across machines,"
       note "or leave empty for local-only versioned memory."
       ask GIT_REMOTE "Remote URL (e.g. git@github.com:you/ollmem-memory.git)" ""
-    fi
-    if [ -n "$OPT_GIT_BRANCH" ]; then GIT_BRANCH=$OPT_GIT_BRANCH; else ask GIT_BRANCH "Branch" "main"; fi
-    if [ -n "$OPT_GIT_SYNC" ]; then GIT_SYNC_SECONDS=$OPT_GIT_SYNC; else ask GIT_SYNC_SECONDS "Sync interval in seconds (0 = only at startup/shutdown)" "60"; fi
-    if [ -n "$GIT_REMOTE" ] && ! $NONINTERACTIVE; then
       case "$GIT_REMOTE" in
-        https://*)
+        http://*|https://*)
+          local scheme=${GIT_REMOTE%%://*} rest=${GIT_REMOTE#*://} git_user git_token
           printf '\n'
-          note "HTTPS remotes need credentials. SSH remotes (git@...) use your"
-          note "existing SSH keys and need nothing extra."
-          if confirm "Embed a personal access token (API key) in the remote URL?" n; then
-            ask GIT_USER "Git username" "git"
-            ask_secret GIT_TOKEN "Personal access token (input hidden)"
-            [ -n "$GIT_TOKEN" ] || die "empty token"
-            GIT_REMOTE="https://${GIT_USER}:${GIT_TOKEN}@${GIT_REMOTE#https://}"
-            warn "the token will be stored in $ENV_FILE (permissions 600)"
-          else
-            note "OK — make sure a git credential helper (or SSH) can reach the remote."
+          note "HTTP(S) remotes need credentials unless the repo is public. SSH"
+          note "remotes (git@...) use your existing SSH keys and need nothing extra."
+          if [ "$scheme" = http ]; then
+            warn "plain http sends credentials unencrypted — prefer https or SSH if you can"
           fi
+          case "${rest%%/*}" in
+            *@*)
+              note "the URL already contains credentials — using it as-is."
+              ;;
+            *)
+              if confirm "Embed a personal access token (API key) in the remote URL?" n; then
+                ask git_user "Git username" "git"
+                ask_secret git_token "Personal access token (input hidden)"
+                [ -n "$git_token" ] || die "empty token"
+                GIT_REMOTE="${scheme}://${git_user}:${git_token}@${rest}"
+                warn "the token will be stored in $ENV_FILE (permissions 600)"
+              else
+                note "OK — make sure a git credential helper can reach the remote."
+              fi
+              ;;
+          esac
+          ;;
+        "") ;;
+        /*|file://*|~*)
+          note "local path remote — nothing to configure."
           ;;
         *)
           note "SSH remote — your existing SSH keys will be used, nothing to configure."
           ;;
       esac
+    }
+
+    git_remote_ok() {
+      GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="ssh -o BatchMode=yes" \
+        git ls-remote "$GIT_REMOTE" HEAD >/dev/null 2>&1
+    }
+
+    GIT_REMOTE=$OPT_GIT_REMOTE
+    if [ -z "$GIT_REMOTE" ] && ! $NONINTERACTIVE; then
+      ask_git_remote
     fi
+    if [ -n "$OPT_GIT_BRANCH" ]; then GIT_BRANCH=$OPT_GIT_BRANCH; else ask GIT_BRANCH "Branch" "main"; fi
+    if [ -n "$OPT_GIT_SYNC" ]; then GIT_SYNC_SECONDS=$OPT_GIT_SYNC; else ask GIT_SYNC_SECONDS "Sync interval in seconds (0 = only at startup/shutdown)" "60"; fi
+
+    # Validate the remote now, so a bad URL or token fails here and not at
+    # first sync. An empty (brand-new) remote repo also passes this check.
+    while [ -n "$GIT_REMOTE" ]; do
+      if git_remote_ok; then
+        note "git remote is reachable"
+        break
+      fi
+      warn "cannot reach $GIT_REMOTE (bad URL, missing credentials, or the repo doesn't exist yet)"
+      if $NONINTERACTIVE; then
+        warn "continuing anyway — the first sync will fail until this is fixed"
+        break
+      fi
+      choose REMOTE_RETRY "The git remote isn't reachable — what now?" \
+        "Let me re-enter the URL / credentials" \
+        "Continue anyway — I'll fix it later (syncing fails until then)" \
+        "Abort the install"
+      case "$REMOTE_RETRY" in
+        1) ask_git_remote ;;
+        2) break ;;
+        3) die "aborted — fix the remote and re-run" ;;
+      esac
+    done
     ;;
   3)
     PERSISTENT=false
@@ -548,26 +598,8 @@ info "Checking dependencies"
 
 command -v curl >/dev/null 2>&1 || die "curl is required — install it with your package manager and re-run"
 
-# git — required by git-synced persistence.
-if [ "$PERSISTENCE" = 2 ]; then
-  command -v git >/dev/null 2>&1 \
-    || die "git-synced persistence needs git — install it with your package manager and re-run"
-  # Validate the remote now, so a bad URL or token fails here and not at
-  # first sync. An empty (brand-new) repo also passes this check.
-  if [ -n "$GIT_REMOTE" ]; then
-    if GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="ssh -o BatchMode=yes" \
-         git ls-remote "$GIT_REMOTE" HEAD >/dev/null 2>&1; then
-      note "git remote is reachable"
-    else
-      warn "cannot reach $GIT_REMOTE (bad URL, missing credentials, or the repo doesn't exist yet)"
-      if $NONINTERACTIVE; then
-        warn "continuing anyway — the first sync will fail until this is fixed"
-      else
-        confirm "Continue anyway?" n || die "aborted — fix the remote and re-run"
-      fi
-    fi
-  fi
-fi
+# (git presence and remote reachability are checked when git persistence is
+# chosen, in section 3 — a bad URL or token fails before anything is built.)
 
 # .NET 10 SDK — builds and runs OllMem.
 DOTNET=""
