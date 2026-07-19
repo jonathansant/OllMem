@@ -165,23 +165,24 @@ function setStatus(msg, isError) {
 }
 
 // ---- Data loading ---------------------------------------------------------
+// The API is always asked for everything; owner / scope / scope id narrow the
+// result client-side. That way a partial filter (owner only) never guesses a
+// scope id, and a stale bookmark can fall back to the full graph.
 async function load() {
   const owner = $("owner").value.trim();
   const scope = $("scope").value;
   const scopeId = $("scopeId").value.trim();
 
   const query = new URLSearchParams();
-  if (owner) {
-    query.set("owner", owner);
-    query.set("scope", scope || "user");
-    query.set("scopeId", scopeId || "default");
-  }
+  if (owner) query.set("owner", owner);
+  if (scope) query.set("scope", scope);
+  if (scopeId) query.set("scopeId", scopeId);
   history.replaceState(null, "", query.size ? `?${query}` : location.pathname);
 
   setStatus("loading…");
   let res;
   try {
-    res = await fetch(`/v1/graph${query.size ? `?${query}` : ""}`);
+    res = await fetch("/v1/graph");
   } catch (e) {
     setStatus("cannot reach the OllMem API — is it running?", true);
     return;
@@ -195,9 +196,31 @@ async function load() {
     setStatus(body.error || `request failed (${res.status})`, true);
     return;
   }
-  const data = await res.json();
+  const all = await res.json();
+
+  const matches = ns =>
+    (!owner || ns.owner.toLowerCase() === owner.toLowerCase()) &&
+    (!scope || ns.scope === scope) &&
+    (!scopeId || ns.scopeId.toLowerCase() === scopeId.toLowerCase());
+
+  let data = narrow(all, matches);
+  let notice = "";
+  if ((owner || scope || scopeId) && !data.namespaces.length && all.namespaces.length) {
+    data = all;
+    notice = " · nothing matches the owner/scope filters — showing everything";
+  }
+
   applyData(data);
-  setStatus(`${data.nodes.length} entities · ${data.edges.length} memories · ${data.namespaces.length} namespace${data.namespaces.length === 1 ? "" : "s"}`);
+  setStatus(`${data.nodes.length} entities · ${data.edges.length} memories · ${data.namespaces.length} namespace${data.namespaces.length === 1 ? "" : "s"}${notice}`, !!notice);
+}
+
+function narrow(all, matches) {
+  const keep = new Set(all.namespaces.filter(matches).map(n => n.key));
+  return {
+    namespaces: all.namespaces.filter(n => keep.has(n.key)),
+    nodes: all.nodes.filter(n => keep.has(n.ns)),
+    edges: all.edges.filter(e => keep.has(e.ns)),
+  };
 }
 
 function applyData(data) {

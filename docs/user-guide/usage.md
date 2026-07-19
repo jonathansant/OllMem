@@ -106,9 +106,11 @@ own colour, and the chips above the canvas show/hide one namespace at a time.
 Every entity becomes a draggable node and every memory a labelled arrow
 between them. Click a node to see all facts about it, click an arrow to
 inspect a single memory, and use the filter box to find entities by name.
-Fill in owner (and optionally scope / scope id) before pressing **Load** to
-fetch just one namespace instead, and turn on **auto-refresh** to watch new
-memories appear live while an agent is writing them.
+Fill in any combination of owner / scope / scope id before pressing **Load**
+to narrow the view (a partial match that fits nothing falls back to showing
+everything, so stale bookmarks never leave you with a blank page), and turn
+on **auto-refresh** to watch new memories appear live while an agent is
+writing them.
 
 The page is served by the API itself and talks to `GET /v1/graph`, which
 returns the namespace/node/edge lists — use it directly if you want to feed
