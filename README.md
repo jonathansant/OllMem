@@ -29,6 +29,7 @@ and cloud agent:
 ./install.sh --help       # every question is also a flag; --yes never prompts
 ./install.sh --uninstall  # removes it again
 ./update.sh               # update an existing installation to the current source
+./service.sh              # run the HTTP API as a login service (starts automatically)
 
 # cloud memory + cloud API, usable from everywhere:
 ./install.sh --mode both --matching simple --persistence firestore \

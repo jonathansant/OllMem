@@ -25,6 +25,10 @@ Five minutes from zero to your first stored memory.
 > memories, restarts the API service if one is running, and can add a
 > component your original install skipped — an MCP-only installation is
 > offered the HTTP API, which serves the dashboard (`./update.sh --help`).
+> To keep the API running in the background and start it at every login, run
+> `./service.sh` — it installs a launchd agent (macOS) or systemd user
+> service (Linux), and also gives you `status`, `restart`, `logs`, and
+> `uninstall` subcommands.
 
 ## 1. What you need
 

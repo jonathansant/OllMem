@@ -210,7 +210,9 @@ DOTNET=""
 for candidate in dotnet "$HOME/.dotnet/dotnet"; do
   if command -v "$candidate" >/dev/null 2>&1 || [ -x "$candidate" ]; then
     if "$candidate" --list-sdks 2>/dev/null | grep -q '^10\.'; then
-      DOTNET=$candidate
+      # Resolve to an absolute path: launchers baked into services run with
+      # a minimal PATH where a bare 'dotnet' is not found.
+      DOTNET=$(command -v -- "$candidate" 2>/dev/null || printf '%s' "$candidate")
       break
     fi
   fi
