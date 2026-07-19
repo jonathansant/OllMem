@@ -24,4 +24,7 @@ public interface IVectorStore
 
     /// <summary>All active nodes in a namespace (used by conflict resolution).</summary>
     ValueTask<IReadOnlyList<MemoryNode>> ListActiveAsync(Namespace ns, CancellationToken ct = default);
+
+    /// <summary>All active nodes across every namespace (used by the graph visualizer).</summary>
+    ValueTask<IReadOnlyList<MemoryNode>> ListAllActiveAsync(CancellationToken ct = default);
 }

@@ -56,6 +56,14 @@ public sealed class FirestoreHybridStore : IVectorStore, IGraphStore
         return snapshot.Documents.Select(ToNode).ToList();
     }
 
+    public async ValueTask<IReadOnlyList<MemoryNode>> ListAllActiveAsync(CancellationToken ct = default)
+    {
+        var snapshot = await _ctx.Memories
+            .WhereEqualTo("status", (int)MemoryStatus.Active)
+            .GetSnapshotAsync(ct);
+        return snapshot.Documents.Select(ToNode).ToList();
+    }
+
     // ---- IGraphStore --------------------------------------------------------
 
     // The document is written by the vector upsert; the graph view is the same

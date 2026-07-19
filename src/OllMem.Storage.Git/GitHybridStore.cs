@@ -81,6 +81,26 @@ public sealed class GitHybridStore : IVectorStore, IGraphStore
         }
     }
 
+    public async ValueTask<IReadOnlyList<MemoryNode>> ListAllActiveAsync(CancellationToken ct = default)
+    {
+        await _ctx.Gate.WaitAsync(ct);
+        try
+        {
+            if (!Directory.Exists(_ctx.NodesDirectory))
+                return [];
+            return Directory
+                .EnumerateFiles(_ctx.NodesDirectory, "*.json", SearchOption.AllDirectories)
+                .Select(ReadNode)
+                .OfType<MemoryNode>()
+                .Where(n => n.Status == MemoryStatus.Active)
+                .ToList();
+        }
+        finally
+        {
+            _ctx.Gate.Release();
+        }
+    }
+
     // ---- IGraphStore --------------------------------------------------------
 
     // The node document is written by the vector upsert; the graph view reads

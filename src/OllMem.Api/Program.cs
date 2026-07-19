@@ -50,6 +50,21 @@ app.UseMiddleware<SignatureAuthMiddleware>();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok", service = "ollmem-v2" }));
 
+// Browser UI for exploring the memory graph (fetches /v1/graph).
+app.MapGet("/graph", (IWebHostEnvironment env) =>
+{
+    var page = env.WebRootFileProvider.GetFileInfo("graph.html");
+    if (page.Exists)
+        return Results.Stream(page.CreateReadStream(), "text/html; charset=utf-8");
+
+    // Published installs run the dll from an arbitrary working directory, so
+    // the default (cwd-relative) web root misses; the file ships next to the dll.
+    var published = Path.Combine(AppContext.BaseDirectory, "wwwroot", "graph.html");
+    return File.Exists(published)
+        ? Results.File(published, "text/html; charset=utf-8")
+        : Results.NotFound();
+});
+
 // Dev helper: mint an Ed25519 keypair for signing requests (PRD REQ-1.3).
 app.MapPost("/v1/keypair", (ISignatureScheme scheme) =>
 {
@@ -115,6 +130,37 @@ v1.MapGet("/neighbors", async (
 
     var edges = await engine.NeighborsAsync(ns, subject, predicate, ct);
     return Results.Ok(edges.Select(EdgeDto.From).ToList());
+});
+
+// Graph dump consumed by the /graph browser visualizer. Without parameters it
+// spans every namespace; owner (+ scope/scopeId) narrows it to one.
+v1.MapGet("/graph", async (
+    string? owner, string? scope, string? scopeId,
+    HttpContext ctx, IVectorStore vectors, CancellationToken ct) =>
+{
+    IReadOnlyList<MemoryNode> memories;
+    if (string.IsNullOrWhiteSpace(owner))
+    {
+        var all = await vectors.ListAllActiveAsync(ct);
+
+        // Signature auth compartmentalises namespaces (REQ-1.3): a verified
+        // caller only ever sees namespaces belonging to their signing key.
+        var verifiedOwner = ctx.Items.TryGetValue(SignatureAuthMiddleware.OwnerItemKey, out var v)
+            ? v as string
+            : null;
+        memories = verifiedOwner is null
+            ? all
+            : all.Where(n => string.Equals(n.Namespace.Owner, verifiedOwner, StringComparison.OrdinalIgnoreCase)).ToList();
+    }
+    else
+    {
+        var req = new RememberRequest { Owner = owner, Scope = scope ?? "user", ScopeId = scopeId ?? "default" };
+        if (!NamespaceResolver.TryResolve(req, ctx, out var ns, out var error))
+            return Results.BadRequest(new { error });
+        memories = await vectors.ListActiveAsync(ns, ct);
+    }
+
+    return Results.Ok(GraphResponse.From(memories));
 });
 
 // Cryptographic audit log inspection + integrity check (REQ-3.3).

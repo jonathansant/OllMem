@@ -68,6 +68,19 @@ public sealed class SqliteHybridStore : IVectorStore, IGraphStore
         return list;
     }
 
+    public async ValueTask<IReadOnlyList<MemoryNode>> ListAllActiveAsync(CancellationToken ct = default)
+    {
+        await using var conn = _ctx.OpenConnection();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"SELECT {Columns} FROM memories WHERE status = 0";
+
+        var list = new List<MemoryNode>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            list.Add(Map(reader));
+        return list;
+    }
+
     // ---- IGraphStore --------------------------------------------------------
 
     // The row is written by the vector upsert; the graph view is the same table,

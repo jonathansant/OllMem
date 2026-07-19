@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OllMem — Memory Graph</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #161b22;
+    --border: #2b3240;
+    --text: #dfe5ec;
+    --muted: #8b96a5;
+    --accent: #4fa3ff;
+    --edge: #3d4655;
+    --edge-hi: #4fa3ff;
+    --danger: #f47067;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; flex-direction: column;
+    background: var(--bg); color: var(--text);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    padding: 10px 14px; background: var(--panel); border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 15px; margin: 0 12px 0 0; font-weight: 600; white-space: nowrap; }
+  header h1 span { color: var(--accent); }
+  input, select, button {
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 9px; font: inherit;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--accent); }
+  #owner { width: 190px; }
+  #scopeId { width: 110px; }
+  #search { width: 160px; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #08131f; font-weight: 600; }
+  button:hover { border-color: var(--accent); }
+  #status { color: var(--muted); font-size: 12px; margin-left: auto; white-space: nowrap; }
+  #status.error { color: var(--danger); }
+  #nsbar {
+    display: none; flex-wrap: wrap; gap: 6px; align-items: center;
+    padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--border);
+  }
+  #nsbar.open { display: flex; }
+  #nsbar .hint { color: var(--muted); font-size: 12px; margin-right: 4px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid var(--border); border-radius: 999px;
+    padding: 3px 10px; font-size: 12px; cursor: pointer; user-select: none;
+    background: var(--bg);
+  }
+  .chip:hover { border-color: var(--accent); }
+  .chip .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .chip .count { color: var(--muted); }
+  .chip.off { opacity: 0.35; }
+  .chip.off .dot { background: var(--muted) !important; }
+  main { flex: 1; display: flex; min-height: 0; }
+  #canvas-wrap { flex: 1; position: relative; min-width: 0; }
+  svg { width: 100%; height: 100%; display: block; cursor: grab; }
+  svg.panning { cursor: grabbing; }
+  #empty {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 6px;
+    color: var(--muted); pointer-events: none; text-align: center; padding: 0 30px;
+  }
+  #empty b { color: var(--text); font-size: 16px; }
+  aside {
+    width: 320px; background: var(--panel); border-left: 1px solid var(--border);
+    padding: 14px; overflow-y: auto; display: none;
+  }
+  aside.open { display: block; }
+  aside h2 { font-size: 14px; margin: 0 0 4px; word-break: break-word; }
+  aside .sub { color: var(--muted); font-size: 12px; margin-bottom: 12px; word-break: break-word; }
+  .mem {
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 9px 11px; margin-bottom: 9px; background: var(--bg);
+  }
+  .mem .triple { font-size: 12px; color: var(--accent); margin-bottom: 4px; word-break: break-word; }
+  .mem .stmt { word-break: break-word; }
+  .mem .meta { color: var(--muted); font-size: 11px; margin-top: 6px; word-break: break-word; }
+  .node circle { stroke: #0e1116; stroke-width: 1.5; cursor: pointer; }
+  .node.dim { opacity: 0.15; }
+  .node.selected circle, .node:hover circle { stroke: var(--accent); stroke-width: 2.5; }
+  .node text {
+    fill: var(--text); font-size: 11px; pointer-events: none;
+    paint-order: stroke; stroke: var(--bg); stroke-width: 3px;
+  }
+  .link { stroke: var(--edge); stroke-width: 1.4; fill: none; cursor: pointer; }
+  .link.dim { opacity: 0.08; }
+  .link.selected, .link:hover { stroke: var(--edge-hi); stroke-width: 2.2; }
+  .link-label {
+    fill: var(--muted); font-size: 9.5px; pointer-events: none;
+    paint-order: stroke; stroke: var(--bg); stroke-width: 3px;
+  }
+  .link-label.dim { opacity: 0.08; }
+  label.chk { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; user-select: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span>OllMem</span> memory graph</h1>
+  <input id="owner" placeholder="owner (empty = everyone)" spellcheck="false">
+  <select id="scope">
+    <option value="">any scope</option>
+    <option value="user">user</option>
+    <option value="agent">agent</option>
+    <option value="session">session</option>
+  </select>
+  <input id="scopeId" placeholder="scope id" spellcheck="false">
+  <button id="load" class="primary">Load</button>
+  <input id="search" placeholder="filter entities…" spellcheck="false">
+  <label class="chk"><input type="checkbox" id="labels" checked> edge labels</label>
+  <label class="chk"><input type="checkbox" id="auto"> auto-refresh</label>
+  <span id="status"></span>
+</header>
+<div id="nsbar"><span class="hint">namespaces</span></div>
+<main>
+  <div id="canvas-wrap">
+    <svg id="svg">
+      <g id="viewport">
+        <g id="links"></g>
+        <g id="linkLabels"></g>
+        <g id="nodes"></g>
+      </g>
+    </svg>
+    <div id="empty">
+      <b>No memories to show</b>
+      <div>Press Load to fetch every memory across all owners and scopes, or narrow it down with the fields above. Facts stored via /v1/remember or /v1/extract appear here as an entity–relationship graph.</div>
+    </div>
+  </div>
+  <aside id="panel"></aside>
+</main>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const svg = $("svg"), viewport = $("viewport");
+const gLinks = $("links"), gLabels = $("linkLabels"), gNodes = $("nodes");
+
+// Distinguishable on the dark canvas; one colour per namespace.
+const PALETTE = ["#58a6ff", "#3fb950", "#d29922", "#f778ba", "#a371f7",
+                 "#39c5cf", "#f0883e", "#8ddb8c", "#ff7b72", "#79c0ff"];
+
+let nodes = [], links = [], namespaces = [], selected = null;
+let nsColor = new Map();
+const hiddenNs = new Set();
+let view = { x: 0, y: 0, k: 1 };
+let heat = 0, rafId = null, autoTimer = null;
+
+// ---- URL / localStorage bootstrapping -------------------------------------
+const params = new URLSearchParams(location.search);
+$("owner").value = params.get("owner") || "";
+$("scope").value = params.get("scope") || "";
+$("scopeId").value = params.get("scopeId") || "";
+
+function setStatus(msg, isError) {
+  const el = $("status");
+  el.textContent = msg;
+  el.className = isError ? "error" : "";
+}
+
+// ---- Data loading ---------------------------------------------------------
+async function load() {
+  const owner = $("owner").value.trim();
+  const scope = $("scope").value;
+  const scopeId = $("scopeId").value.trim();
+
+  const query = new URLSearchParams();
+  if (owner) {
+    query.set("owner", owner);
+    query.set("scope", scope || "user");
+    query.set("scopeId", scopeId || "default");
+  }
+  history.replaceState(null, "", query.size ? `?${query}` : location.pathname);
+
+  setStatus("loading…");
+  let res;
+  try {
+    res = await fetch(`/v1/graph${query.size ? `?${query}` : ""}`);
+  } catch (e) {
+    setStatus("cannot reach the OllMem API — is it running?", true);
+    return;
+  }
+  if (res.status === 401) {
+    setStatus("401 — the API requires signed requests (OllMem:RequireSignature). Disable it for browsing, or proxy signed calls.", true);
+    return;
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    setStatus(body.error || `request failed (${res.status})`, true);
+    return;
+  }
+  const data = await res.json();
+  applyData(data);
+  setStatus(`${data.nodes.length} entities · ${data.edges.length} memories · ${data.namespaces.length} namespace${data.namespaces.length === 1 ? "" : "s"}`);
+}
+
+function applyData(data) {
+  namespaces = data.namespaces;
+  nsColor = new Map(namespaces.map((n, i) => [n.key, PALETTE[i % PALETTE.length]]));
+  for (const key of [...hiddenNs]) {
+    if (!namespaces.some(n => n.key === key)) hiddenNs.delete(key);
+  }
+
+  // Preserve positions of nodes that survive a refresh so the layout is stable.
+  const prev = new Map(nodes.map(n => [n.key, n]));
+  const w = svg.clientWidth, h = svg.clientHeight;
+
+  nodes = data.nodes.map((n, i) => {
+    const key = `${n.ns}|${n.id.toLowerCase()}`;
+    const old = prev.get(key);
+    const angle = (i / Math.max(1, data.nodes.length)) * 2 * Math.PI;
+    return {
+      key, id: n.id, ns: n.ns, degree: n.degree,
+      x: old ? old.x : w / 2 + Math.cos(angle) * Math.min(w, h) * 0.3,
+      y: old ? old.y : h / 2 + Math.sin(angle) * Math.min(w, h) * 0.3,
+      vx: 0, vy: 0, fixed: old ? old.fixed : false
+    };
+  });
+  const byKey = new Map(nodes.map(n => [n.key, n]));
+
+  // Parallel edges between the same pair get increasing curvature offsets.
+  const pairCount = new Map();
+  links = data.edges.map(e => {
+    const a = byKey.get(`${e.ns}|${e.subject.toLowerCase()}`);
+    const b = byKey.get(`${e.ns}|${e.object.toLowerCase()}`);
+    const pair = [a.key, b.key].sort().join("§");
+    const idx = pairCount.get(pair) || 0;
+    pairCount.set(pair, idx + 1);
+    return { source: a, target: b, mem: e, lane: idx };
+  });
+
+  $("empty").style.display = nodes.length ? "none" : "flex";
+  selected = null;
+  renderNsBar();
+  render();
+  reheat();
+}
+
+// ---- Namespace filter bar --------------------------------------------------
+function renderNsBar() {
+  const bar = $("nsbar");
+  bar.className = namespaces.length ? "open" : "";
+  bar.innerHTML = '<span class="hint">namespaces</span>';
+  for (const ns of namespaces) {
+    const chip = document.createElement("span");
+    chip.className = "chip" + (hiddenNs.has(ns.key) ? " off" : "");
+    chip.title = `${ns.owner} / ${ns.scope} / ${ns.scopeId} — click to show/hide`;
+    chip.innerHTML = `<span class="dot" style="background:${nsColor.get(ns.key)}"></span>` +
+      `${esc(ns.key)} <span class="count">${ns.memoryCount}</span>`;
+    chip.addEventListener("click", () => {
+      if (hiddenNs.has(ns.key)) hiddenNs.delete(ns.key); else hiddenNs.add(ns.key);
+      chip.classList.toggle("off");
+      applyVisibility();
+      reheat();
+    });
+    bar.appendChild(chip);
+  }
+}
+
+function visible(n) { return !hiddenNs.has(n.ns); }
+
+function applyVisibility() {
+  for (const n of nodes) n.g.style.display = visible(n) ? "" : "none";
+  for (const l of links) {
+    const on = visible(l.source) && visible(l.target);
+    l.path.style.display = on ? "" : "none";
+    l.label.style.display = on && $("labels").checked ? "" : "none";
+  }
+  if (selected?.type === "node" && !visible(selected.node)) select(null);
+  else if (selected?.type === "edge" && !visible(selected.link.source)) select(null);
+}
+
+// ---- Rendering ------------------------------------------------------------
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+function radius(n) { return 7 + Math.min(14, Math.sqrt(n.degree) * 3); }
+
+function render() {
+  gLinks.innerHTML = gLabels.innerHTML = gNodes.innerHTML = "";
+
+  for (const l of links) {
+    l.path = el("path", { class: "link" });
+    l.path.addEventListener("click", ev => { ev.stopPropagation(); select({ type: "edge", link: l }); });
+    gLinks.appendChild(l.path);
+    l.label = el("text", { class: "link-label", "text-anchor": "middle" });
+    l.label.textContent = l.mem.predicate;
+    gLabels.appendChild(l.label);
+  }
+
+  for (const n of nodes) {
+    n.g = el("g", { class: "node" });
+    const c = el("circle", { r: radius(n) });
+    c.style.fill = nsColor.get(n.ns) || "#58a6ff";
+    const t = el("text", { x: radius(n) + 4, y: 4 });
+    t.textContent = n.id.length > 28 ? n.id.slice(0, 27) + "…" : n.id;
+    n.g.append(c, t);
+    n.g.addEventListener("click", ev => { ev.stopPropagation(); select({ type: "node", node: n }); });
+    n.g.addEventListener("pointerdown", ev => startDrag(n, ev));
+    gNodes.appendChild(n.g);
+  }
+  applyVisibility();
+  applyFilter();
+  position();
+}
+
+function position() {
+  const showLabels = $("labels").checked;
+  for (const l of links) {
+    const { source: a, target: b } = l;
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const bend = (l.lane === 0 ? 0 : (Math.ceil(l.lane / 2)) * (l.lane % 2 ? 1 : -1)) * 22;
+    const mx = (a.x + b.x) / 2 - dy * 0.0018 * bend * 20;
+    const my = (a.y + b.y) / 2 + dx * 0.0018 * bend * 20;
+    l.path.setAttribute("d", `M${a.x},${a.y} Q${mx},${my} ${b.x},${b.y}`);
+    l.label.setAttribute("x", (a.x + 2 * mx + b.x) / 4);
+    l.label.setAttribute("y", (a.y + 2 * my + b.y) / 4 - 3);
+    if (visible(l.source) && visible(l.target))
+      l.label.style.display = showLabels ? "" : "none";
+  }
+  for (const n of nodes) n.g.setAttribute("transform", `translate(${n.x},${n.y})`);
+}
+
+// ---- Force simulation -----------------------------------------------------
+function reheat() {
+  heat = 1;
+  if (!rafId) tick();
+}
+
+function tick() {
+  rafId = null;
+  if (heat < 0.005 || !nodes.length) { heat = 0; return; }
+
+  const w = svg.clientWidth, h = svg.clientHeight;
+  const repulsion = 5200, springLen = 130, springK = 0.045, centerK = 0.012, damping = 0.82;
+  const active = nodes.filter(visible);
+
+  for (let i = 0; i < active.length; i++) {
+    const a = active[i];
+    for (let j = i + 1; j < active.length; j++) {
+      const b = active[j];
+      let dx = b.x - a.x, dy = b.y - a.y;
+      let d2 = dx * dx + dy * dy || 1;
+      if (d2 > 250000) continue;
+      const f = repulsion / d2, d = Math.sqrt(d2);
+      dx /= d; dy /= d;
+      a.vx -= dx * f; a.vy -= dy * f;
+      b.vx += dx * f; b.vy += dy * f;
+    }
+  }
+  for (const l of links) {
+    if (!visible(l.source) || !visible(l.target)) continue;
+    const { source: a, target: b } = l;
+    let dx = b.x - a.x, dy = b.y - a.y;
+    const d = Math.sqrt(dx * dx + dy * dy) || 1;
+    const f = (d - springLen) * springK;
+    dx /= d; dy /= d;
+    a.vx += dx * f; a.vy += dy * f;
+    b.vx -= dx * f; b.vy -= dy * f;
+  }
+  for (const n of active) {
+    n.vx += (w / 2 - n.x) * centerK;
+    n.vy += (h / 2 - n.y) * centerK;
+    if (!n.fixed) {
+      n.vx *= damping; n.vy *= damping;
+      n.x += n.vx * heat; n.y += n.vy * heat;
+    } else { n.vx = n.vy = 0; }
+  }
+  heat *= 0.985;
+  position();
+  rafId = requestAnimationFrame(tick);
+}
+
+// ---- Interaction: drag, pan, zoom -----------------------------------------
+function toWorld(ev) {
+  const r = svg.getBoundingClientRect();
+  return { x: (ev.clientX - r.left - view.x) / view.k, y: (ev.clientY - r.top - view.y) / view.k };
+}
+
+function startDrag(n, ev) {
+  ev.stopPropagation();
+  n.fixed = true;
+  const move = e => { const p = toWorld(e); n.x = p.x; n.y = p.y; reheat(); };
+  const up = () => {
+    n.fixed = false; reheat();
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+}
+
+svg.addEventListener("pointerdown", ev => {
+  svg.classList.add("panning");
+  const start = { x: ev.clientX, y: ev.clientY, vx: view.x, vy: view.y };
+  const move = e => {
+    view.x = start.vx + (e.clientX - start.x);
+    view.y = start.vy + (e.clientY - start.y);
+    applyView();
+  };
+  const up = () => {
+    svg.classList.remove("panning");
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+});
+
+svg.addEventListener("wheel", ev => {
+  ev.preventDefault();
+  const r = svg.getBoundingClientRect();
+  const mx = ev.clientX - r.left, my = ev.clientY - r.top;
+  const factor = ev.deltaY < 0 ? 1.12 : 1 / 1.12;
+  const k = Math.max(0.15, Math.min(4, view.k * factor));
+  view.x = mx - (mx - view.x) * (k / view.k);
+  view.y = my - (my - view.y) * (k / view.k);
+  view.k = k;
+  applyView();
+}, { passive: false });
+
+function applyView() {
+  viewport.setAttribute("transform", `translate(${view.x},${view.y}) scale(${view.k})`);
+}
+
+svg.addEventListener("click", () => select(null));
+
+// ---- Selection + details panel --------------------------------------------
+function fmtDate(s) { return new Date(s).toLocaleString(); }
+
+function memCard(m) {
+  const dot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${nsColor.get(m.ns)};margin-right:5px"></span>`;
+  return `<div class="mem">
+    <div class="triple">${esc(m.subject)} —${esc(m.predicate)}→ ${esc(m.object)}</div>
+    <div class="stmt">${esc(m.statement)}</div>
+    <div class="meta">${dot}${esc(m.ns)}</div>
+    <div class="meta">recalled ${m.accessCount}× · created ${fmtDate(m.createdAt)} · last used ${fmtDate(m.lastAccessedAt)}</div>
+  </div>`;
+}
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+function select(sel) {
+  selected = sel;
+  const panel = $("panel");
+  for (const n of nodes) n.g.classList.toggle("selected", sel?.type === "node" && sel.node === n);
+  for (const l of links) l.path.classList.toggle("selected", sel?.type === "edge" && sel.link === l);
+
+  if (!sel) { panel.className = ""; panel.innerHTML = ""; applyFilter(); return; }
+  panel.className = "open";
+
+  if (sel.type === "node") {
+    const n = sel.node;
+    const related = links.filter(l => l.source === n || l.target === n);
+    panel.innerHTML = `<h2>${esc(n.id)}</h2>
+      <div class="sub">${esc(n.ns)} · ${related.length} relationship${related.length === 1 ? "" : "s"}</div>
+      ${related.map(l => memCard(l.mem)).join("")}`;
+    highlightNeighborhood(n, related);
+  } else {
+    const m = sel.link.mem;
+    panel.innerHTML = `<h2>Memory</h2>
+      <div class="sub">${esc(m.memoryId)}</div>
+      ${memCard(m)}`;
+    applyFilter();
+  }
+}
+
+function highlightNeighborhood(center, related) {
+  const keep = new Set([center]);
+  for (const l of related) { keep.add(l.source); keep.add(l.target); }
+  for (const n of nodes) n.g.classList.toggle("dim", !keep.has(n));
+  for (const l of links) {
+    const on = related.includes(l);
+    l.path.classList.toggle("dim", !on);
+    l.label.classList.toggle("dim", !on);
+  }
+}
+
+// ---- Search filter ---------------------------------------------------------
+function applyFilter() {
+  const q = $("search").value.trim().toLowerCase();
+  if (selected?.type === "node") return; // neighborhood highlight wins
+  for (const n of nodes) n.g.classList.toggle("dim", !!q && !n.id.toLowerCase().includes(q));
+  for (const l of links) {
+    const on = !q
+      || l.source.id.toLowerCase().includes(q)
+      || l.target.id.toLowerCase().includes(q)
+      || l.mem.predicate.toLowerCase().includes(q);
+    l.path.classList.toggle("dim", !on);
+    l.label.classList.toggle("dim", !on);
+  }
+}
+
+// ---- Wiring ----------------------------------------------------------------
+$("load").addEventListener("click", load);
+$("search").addEventListener("input", applyFilter);
+$("labels").addEventListener("change", () => { applyVisibility(); position(); });
+$("auto").addEventListener("change", ev => {
+  clearInterval(autoTimer);
+  if (ev.target.checked) autoTimer = setInterval(load, 5000);
+});
+for (const id of ["owner", "scopeId"])
+  $(id).addEventListener("keydown", ev => { if (ev.key === "Enter") load(); });
+window.addEventListener("resize", reheat);
+
+load();
+</script>
+</body>
+</html>

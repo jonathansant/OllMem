@@ -18,6 +18,14 @@ Five minutes from zero to your first stored memory.
 > (`./install.sh --help`), and `./install.sh --uninstall` removes it again.
 > The steps below do the same thing by hand.
 
+> **Already installed?** Get new features (like the [browser graph
+> dashboard](usage.md#see-the-graph-in-your-browser-graph)) with `git pull`
+> followed by `./update.sh`. It rebuilds your existing installation from the
+> current source without touching your configuration, master key, or stored
+> memories, restarts the API service if one is running, and can add a
+> component your original install skipped — an MCP-only installation is
+> offered the HTTP API, which serves the dashboard (`./update.sh --help`).
+
 ## 1. What you need
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download) — the thing that builds

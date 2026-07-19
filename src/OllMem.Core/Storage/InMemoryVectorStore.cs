@@ -57,6 +57,10 @@ public sealed class InMemoryVectorStore : IVectorStore
     public ValueTask<IReadOnlyList<MemoryNode>> ListActiveAsync(Namespace ns, CancellationToken ct = default) =>
         ValueTask.FromResult<IReadOnlyList<MemoryNode>>(EnumerateActive(ns).ToList());
 
+    public ValueTask<IReadOnlyList<MemoryNode>> ListAllActiveAsync(CancellationToken ct = default) =>
+        ValueTask.FromResult<IReadOnlyList<MemoryNode>>(
+            _nodes.Values.Where(n => n.Status == MemoryStatus.Active).ToList());
+
     private IEnumerable<MemoryNode> EnumerateActive(Namespace ns)
     {
         if (!_byNamespace.TryGetValue(ns.Key, out var bucket))

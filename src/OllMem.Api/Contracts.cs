@@ -72,3 +72,60 @@ public sealed record ScoredMemoryDto(
 }
 
 public sealed record KeyPairResponse(string PublicKeyHex, string PrivateKeyHex);
+
+/// <summary>A namespace present in the graph dump served to the browser visualizer.</summary>
+public sealed record GraphNamespaceDto(string Key, string Owner, string Scope, string ScopeId, int MemoryCount);
+
+/// <summary>An entity in the graph dump; entities are scoped to their namespace.</summary>
+public sealed record GraphNodeDto(string Id, string Ns, int Degree);
+
+/// <summary>A memory-backed relationship in the graph dump, with metadata for display.</summary>
+public sealed record GraphEdgeDto(
+    Guid MemoryId,
+    string Ns,
+    string Subject,
+    string Predicate,
+    string Object,
+    string Statement,
+    int AccessCount,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset LastAccessedAt)
+{
+    public static GraphEdgeDto From(MemoryNode n) => new(
+        n.Id, n.Namespace.Key, n.Edge.Subject, n.Edge.Predicate, n.Edge.Object,
+        n.Statement, n.AccessCount, n.CreatedAt, n.LastAccessedAt);
+}
+
+public sealed record GraphResponse(
+    IReadOnlyList<GraphNamespaceDto> Namespaces,
+    IReadOnlyList<GraphNodeDto> Nodes,
+    IReadOnlyList<GraphEdgeDto> Edges)
+{
+    public static GraphResponse From(IReadOnlyList<MemoryNode> memories)
+    {
+        var edges = memories.Select(GraphEdgeDto.From).ToList();
+
+        // Entities never merge across namespaces (one owner's "user" is not
+        // another's); within a namespace they merge case-insensitively because
+        // subjects/predicates are stored lower-cased but objects keep their
+        // original casing (GraphEdge.Create).
+        var nodes = edges
+            .SelectMany(e => new[] { (e.Ns, Name: e.Subject), (e.Ns, Name: e.Object) })
+            .GroupBy(x => (x.Ns, Key: x.Name.ToLowerInvariant()))
+            .Select(g => new GraphNodeDto(g.First().Name, g.Key.Ns, g.Count()))
+            .ToList();
+
+        var namespaces = memories
+            .GroupBy(m => m.Namespace.Key)
+            .Select(g =>
+            {
+                var ns = g.First().Namespace;
+                return new GraphNamespaceDto(
+                    ns.Key, ns.Owner, ns.Scope.ToString().ToLowerInvariant(), ns.ScopeId, g.Count());
+            })
+            .OrderBy(n => n.Key)
+            .ToList();
+
+        return new GraphResponse(namespaces, nodes, edges);
+    }
+}

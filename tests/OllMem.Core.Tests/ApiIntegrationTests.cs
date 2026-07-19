@@ -116,6 +116,80 @@ public class ApiIntegrationTests : IClassFixture<ApiIntegrationTests.OfflineFact
     }
 
     [Fact]
+    public async Task Graph_returns_entities_and_memory_edges()
+    {
+        var owner = $"owner-{Guid.NewGuid():N}";
+        object Fact(string statement, string predicate, string @object) => new
+        {
+            owner, scope = "user", scopeId = "u1",
+            statement, subject = "user", predicate, @object
+        };
+
+        await _client.PostAsJsonAsync("/v1/remember", Fact("User lives in San Francisco", "lives in", "San Francisco"));
+        await _client.PostAsJsonAsync("/v1/remember", Fact("User works at Acme", "works at", "Acme"));
+
+        var res = await _client.GetAsync($"/v1/graph?owner={owner}&scope=user&scopeId=u1");
+        res.EnsureSuccessStatusCode();
+
+        var json = await res.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(1, json.GetProperty("namespaces").GetArrayLength());
+        Assert.Equal(2, json.GetProperty("edges").GetArrayLength());
+        // Entities: user, San Francisco, Acme.
+        Assert.Equal(3, json.GetProperty("nodes").GetArrayLength());
+
+        var user = json.GetProperty("nodes").EnumerateArray()
+            .Single(n => n.GetProperty("id").GetString() == "user");
+        Assert.Equal(2, user.GetProperty("degree").GetInt32());
+    }
+
+    [Fact]
+    public async Task Graph_without_parameters_spans_all_namespaces()
+    {
+        var ownerA = $"owner-{Guid.NewGuid():N}";
+        var ownerB = $"owner-{Guid.NewGuid():N}";
+        await _client.PostAsJsonAsync("/v1/remember", new
+        {
+            owner = ownerA, scope = "user", scopeId = "u1",
+            statement = "A likes tea", subject = "user", predicate = "likes", @object = "tea"
+        });
+        await _client.PostAsJsonAsync("/v1/remember", new
+        {
+            owner = ownerB, scope = "agent", scopeId = "bot",
+            statement = "B likes coffee", subject = "user", predicate = "likes", @object = "coffee"
+        });
+
+        var res = await _client.GetAsync("/v1/graph");
+        res.EnsureSuccessStatusCode();
+        var json = await res.Content.ReadFromJsonAsync<JsonElement>();
+
+        var keys = json.GetProperty("namespaces").EnumerateArray()
+            .Select(n => n.GetProperty("key").GetString()).ToList();
+        Assert.Contains($"{ownerA}/user/u1", keys);
+        Assert.Contains($"{ownerB}/agent/bot", keys);
+
+        // Entities never merge across namespaces: each owner keeps its own "user".
+        var userNodes = json.GetProperty("nodes").EnumerateArray()
+            .Where(n => n.GetProperty("id").GetString() == "user")
+            .Select(n => n.GetProperty("ns").GetString()).ToList();
+        Assert.Contains($"{ownerA}/user/u1", userNodes);
+        Assert.Contains($"{ownerB}/agent/bot", userNodes);
+
+        // Every edge is tagged with its namespace so the UI can filter.
+        Assert.All(json.GetProperty("edges").EnumerateArray(),
+            e => Assert.False(string.IsNullOrEmpty(e.GetProperty("ns").GetString())));
+    }
+
+    [Fact]
+    public async Task Graph_visualizer_page_is_served()
+    {
+        var res = await _client.GetAsync("/graph");
+        res.EnsureSuccessStatusCode();
+        Assert.Contains("text/html", res.Content.Headers.ContentType!.ToString());
+        var html = await res.Content.ReadAsStringAsync();
+        Assert.Contains("/v1/graph", html);
+    }
+
+    [Fact]
     public async Task Keypair_endpoint_returns_hex_keys()
     {
         var res = await _client.PostAsync("/v1/keypair", content: null);

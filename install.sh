@@ -907,7 +907,9 @@ smoke_test_api() {
 smoke_test_mcp() {
   local out="$PREFIX/smoke-mcp.log" req pid i
   req='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ollmem-installer","version":"1.0"}}}'
-  printf '%s\n' "$req" | "$PREFIX/bin/ollmem-mcp" >"$out" 2>"$out.err" &
+  # Keep stdin open after the request: closing it immediately makes the server
+  # shut its transport down before the initialize response is flushed.
+  ( printf '%s\n' "$req"; sleep 15 ) | "$PREFIX/bin/ollmem-mcp" >"$out" 2>"$out.err" &
   pid=$!
   for i in $(seq 1 30); do
     grep -q '"jsonrpc"' "$out" 2>/dev/null && break

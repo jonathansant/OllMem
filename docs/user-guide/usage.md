@@ -98,6 +98,29 @@ curl -s "$BASE/v1/neighbors?owner=demo&scope=user&scopeId=u1&subject=user"
 Returns arrows like `user → lives in → Munich`, `user → works at → Acme`.
 Add `&predicate=lives%20in` to filter to one kind of arrow.
 
+## See the graph in your browser (`/graph`)
+
+Open <http://localhost:5021/graph> to explore the whole memory graph visually.
+It loads every memory across all owners and scopes: each namespace gets its
+own colour, and the chips above the canvas show/hide one namespace at a time.
+Every entity becomes a draggable node and every memory a labelled arrow
+between them. Click a node to see all facts about it, click an arrow to
+inspect a single memory, and use the filter box to find entities by name.
+Fill in owner (and optionally scope / scope id) before pressing **Load** to
+fetch just one namespace instead, and turn on **auto-refresh** to watch new
+memories appear live while an agent is writing them.
+
+The page is served by the API itself and talks to `GET /v1/graph`, which
+returns the namespace/node/edge lists — use it directly if you want to feed
+the graph into your own tooling. Without parameters it spans every namespace
+(when request signing is on, only the signing key's own namespaces); with
+owner/scope/scopeId it narrows to one:
+
+```bash
+curl -s "$BASE/v1/graph"
+curl -s "$BASE/v1/graph?owner=demo&scope=user&scopeId=u1"
+```
+
 ## Check the logbook (`/v1/audit`)
 
 Every create, read and update is written to a tamper-evident log:
@@ -120,6 +143,8 @@ chain visibly.
 | `POST /v1/extract` | Read a transcript and save the facts it finds |
 | `POST /v1/recall` | Search memories by meaning |
 | `GET  /v1/neighbors` | List an entity's relationships |
+| `GET  /v1/graph` | Dump the graph — all namespaces, or one via owner/scope/scopeId |
+| `GET  /graph` | Interactive graph visualizer in the browser |
 | `GET  /v1/audit` | Read + verify the audit log |
 
 ## Give your AI assistant a memory (MCP)
