@@ -47,7 +47,7 @@ openssl rand -base64 32
 
 ## Keeping memories forever (persistence)
 
-Out of the box, memories live in RAM. Two storage backends make them
+Out of the box, memories live in RAM. Three storage backends make them
 permanent. Pick **one**:
 
 | You want… | Use | Set |
@@ -55,8 +55,9 @@ permanent. Pick **one**:
 | Nothing to survive restarts (demos, tests) | in-memory | *(nothing)* |
 | A simple file on this one machine | **SQLite** | `OllMem:Sqlite:Path` |
 | One shared memory on all your machines | **Git** | `OllMem:Git:Path` (+ remote) |
+| A managed cloud memory (works with a cloud-deployed API too) | **Firestore** | `OllMem:Firestore:ProjectId` |
 
-If you configure both, git wins.
+If you configure more than one, git wins over Firestore, which wins over SQLite.
 
 ### SQLite storage — one file on one machine
 
@@ -122,6 +123,50 @@ OLLMEM_MASTER_KEY_BASE64=<same key> \
   conflict by design.
 - Make the remote **private** — it holds your agent's memory (contents are
   encrypted, but still).
+- Use the **same master key** on every machine, and read
+  [don't mix embedding spaces](#one-warning-dont-mix-embedding-models) below.
+
+### Firestore storage — a managed cloud memory
+
+Memories live in **Google Cloud Firestore**, a fully managed database with a
+generous free tier. Every machine, device or agent pointed at the same project
+shares one memory, with nothing of your own to sync or host. It's also the
+backend to pick when you deploy the OllMem API itself to the cloud —
+`./install.sh --deploy-firebase` puts the API on Cloud Run behind Firebase
+Hosting, and local installs and the cloud API then share the same memory.
+
+You need a Google Cloud / Firebase project with Firestore enabled
+([console.firebase.google.com](https://console.firebase.google.com) → create
+project → Firestore Database), and credentials on the machine: either
+`gcloud auth application-default login` or a service-account JSON file.
+
+```bash
+# API
+OllMem__Firestore__ProjectId=my-project \
+OllMem__MasterKeyBase64=<same key on every machine> \
+  dotnet run --project src/OllMem.Api
+
+# MCP server
+OLLMEM_FIRESTORE_PROJECT=my-project \
+OLLMEM_MASTER_KEY_BASE64=<same key> \
+  dotnet run --project src/OllMem.Mcp
+```
+
+| API setting | MCP variable | Default | What it does |
+|-------------|--------------|---------|--------------|
+| `OllMem:Firestore:ProjectId` | `OLLMEM_FIRESTORE_PROJECT` | none (required) | Google Cloud / Firebase project id |
+| `OllMem:Firestore:DatabaseId` | `OLLMEM_FIRESTORE_DATABASE` | `(default)` | Firestore database id |
+| `OllMem:Firestore:CollectionPrefix` | `OLLMEM_FIRESTORE_PREFIX` | `ollmem` | Prefix of the collections OllMem creates |
+| `OllMem:Firestore:CredentialsPath` | `OLLMEM_FIRESTORE_CREDENTIALS` | none (use Application Default Credentials) | Service-account JSON file |
+
+**Good to know:**
+
+- Set the `FIRESTORE_EMULATOR_HOST` environment variable and OllMem talks to
+  the local [Firestore emulator](https://firebase.google.com/docs/emulator-suite)
+  instead of the cloud — handy for tests and offline development.
+- Contents are encrypted with your master key before they leave the machine
+  (statements/subjects used for search are stored as written, like in the
+  other backends — treat the project as private).
 - Use the **same master key** on every machine, and read
   [don't mix embedding spaces](#one-warning-dont-mix-embedding-models) below.
 

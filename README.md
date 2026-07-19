@@ -16,15 +16,22 @@ implementation, so the build always works fully offline (tests, CI, demos).
 
 **Guided install** — one script asks how you want to use OllMem (MCP or HTTP
 API), which matching to use (simple or LLM via Ollama), where memories should
-live (SQLite / git-synced / in-memory), then installs dependencies, builds
-everything, writes the configuration, smoke-tests the result, and can register
-the MCP server with Claude Desktop, Claude Code, Cursor, VS Code (GitHub
-Copilot), the GitHub Copilot CLI/desktop app, and the Gemini CLI:
+live (SQLite / git-synced / Google Cloud Firestore / in-memory), then installs
+dependencies, builds everything, writes the configuration, smoke-tests the
+result, and can register the MCP server with Claude Desktop, Claude Code,
+Cursor, VS Code (GitHub Copilot), the GitHub Copilot CLI/desktop app, and the
+Gemini CLI. With Firestore persistence it can also deploy the API to Firebase
+(Cloud Run + Firebase Hosting), so your memory is reachable from every machine
+and cloud agent:
 
 ```bash
 ./install.sh              # interactive
 ./install.sh --help       # every question is also a flag; --yes never prompts
 ./install.sh --uninstall  # removes it again
+
+# cloud memory + cloud API, usable from everywhere:
+./install.sh --mode both --matching simple --persistence firestore \
+             --firestore-project my-project --deploy-firebase
 ```
 
 Or by hand:
@@ -56,7 +63,7 @@ For users (simple, no prior knowledge needed):
 - [What is OllMem?](docs/user-guide/what-is-ollmem.md) — what it does, in plain words
 - [Getting started](docs/user-guide/getting-started.md) — running in 5 minutes
 - [Using OllMem](docs/user-guide/usage.md) — the HTTP API and the MCP server (Claude Desktop etc.)
-- [Configuration](docs/user-guide/configuration.md) — persistence (SQLite / git-synced shared memory), models, encryption, request signing
+- [Configuration](docs/user-guide/configuration.md) — persistence (SQLite / git-synced shared memory / Firestore cloud memory), models, encryption, request signing
 
 For developers:
 
@@ -75,8 +82,9 @@ For developers:
   Ed25519 request signing, hash-chained tamper-evident audit log
   (REQ-1.3/2.3/3.3).
 - **Portable** — HTTP API and an MCP (Model Context Protocol) server; persist
-  to SQLite or to a **git-synced repo shared by all your machines**; every
-  component swappable behind an interface (REQ-1.2/3.2).
+  to SQLite, to a **git-synced repo shared by all your machines**, or to
+  **Google Cloud Firestore** (with one-command deployment to Firebase Hosting +
+  Cloud Run); every component swappable behind an interface (REQ-1.2/3.2).
 
 ## Solution layout
 
@@ -85,6 +93,7 @@ OllMem.sln
 ├─ src/
 │  ├─ OllMem.Core/            Domain + engine services (no web deps)
 │  ├─ OllMem.Models.Ollama/   Free open-source model backend (local Ollama)
+│  ├─ OllMem.Storage.Firestore/ Google Cloud Firestore stores (cloud memory, opt-in)
 │  ├─ OllMem.Storage.Git/     Git-synced persistent stores (shared memory, opt-in)
 │  ├─ OllMem.Storage.Sqlite/  SQLite persistent stores (opt-in)
 │  ├─ OllMem.Api/             ASP.NET Core minimal API + Ed25519 auth

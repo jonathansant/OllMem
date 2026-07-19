@@ -3,6 +3,7 @@ using OllMem.Core;
 using OllMem.Core.Abstractions;
 using OllMem.Core.Domain;
 using OllMem.Models.Ollama;
+using OllMem.Storage.Firestore;
 using OllMem.Storage.Git;
 using OllMem.Storage.Sqlite;
 
@@ -14,12 +15,17 @@ builder.Services.AddSingleton(apiOptions);
 
 // Opt into persistent storage, registered before AddOllMemMemory so its TryAdd
 // defaults don't take effect: git-synced storage when OllMem:Git:Path is
-// configured (shared memory across machines via OllMem:Git:RemoteUrl),
-// otherwise SQLite when OllMem:Sqlite:Path is configured.
+// configured (shared memory across machines via OllMem:Git:RemoteUrl), then
+// Firestore when OllMem:Firestore:ProjectId is configured (managed cloud
+// memory — pairs with a Firebase Hosting + Cloud Run deployment), otherwise
+// SQLite when OllMem:Sqlite:Path is configured.
 var gitSection = builder.Configuration.GetSection("OllMem:Git");
+var firestoreSection = builder.Configuration.GetSection("OllMem:Firestore");
 var sqlitePath = builder.Configuration["OllMem:Sqlite:Path"];
 if (!string.IsNullOrWhiteSpace(gitSection["Path"]))
     builder.Services.AddOllMemGitStorage(o => gitSection.Bind(o));
+else if (!string.IsNullOrWhiteSpace(firestoreSection["ProjectId"]))
+    builder.Services.AddOllMemFirestoreStorage(o => firestoreSection.Bind(o));
 else if (!string.IsNullOrWhiteSpace(sqlitePath))
     builder.Services.AddOllMemSqliteStorage(sqlitePath);
 

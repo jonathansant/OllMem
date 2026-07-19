@@ -23,6 +23,7 @@
     <ProjectReference Include="..\..\src\OllMem.Core\OllMem.Core.csproj" />
     <ProjectReference Include="..\..\src\OllMem.Models.Ollama\OllMem.Models.Ollama.csproj" />
     <ProjectReference Include="..\..\src\OllMem.Api\OllMem.Api.csproj" />
+    <ProjectReference Include="..\..\src\OllMem.Storage.Firestore\OllMem.Storage.Firestore.csproj" />
     <ProjectReference Include="..\..\src\OllMem.Storage.Git\OllMem.Storage.Git.csproj" />
     <ProjectReference Include="..\..\src\OllMem.Storage.Sqlite\OllMem.Storage.Sqlite.csproj" />
   </ItemGroup>

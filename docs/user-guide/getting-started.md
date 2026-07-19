@@ -5,13 +5,16 @@ Five minutes from zero to your first stored memory.
 > **Prefer a guided setup?** Run `./install.sh` from the repository root. It
 > asks how you want to use OllMem (MCP server or HTTP API), whether to use
 > simple or LLM matching (Ollama), and where memories should live (SQLite,
-> git-synced, or in-memory) — then installs the dependencies, builds OllMem,
-> generates the master encryption key, writes all configuration and launchers
-> into `~/.ollmem`, smoke-tests the result, and can register the MCP server
-> with your AI tools (Claude Desktop, Claude Code, Cursor, VS Code / GitHub
-> Copilot, the Copilot CLI, Gemini CLI), symlink the launchers into
-> `~/.local/bin`, and set the API up as a login service. Re-running it is safe
-> (your key and memories are kept), every question is also a flag
+> git-synced, Google Cloud Firestore, or in-memory) — then installs the
+> dependencies, builds OllMem, generates the master encryption key, writes all
+> configuration and launchers into `~/.ollmem`, smoke-tests the result, and can
+> register the MCP server with your AI tools (Claude Desktop, Claude Code,
+> Cursor, VS Code / GitHub Copilot, the Copilot CLI, Gemini CLI), symlink the
+> launchers into `~/.local/bin`, and set the API up as a login service. With
+> Firestore persistence it can also deploy the API itself to Firebase (Cloud
+> Run + Firebase Hosting), so your memory is reachable from every machine —
+> `./install.sh --persistence firestore --deploy-firebase`. Re-running it is
+> safe (your key and memories are kept), every question is also a flag
 > (`./install.sh --help`), and `./install.sh --uninstall` removes it again.
 > The steps below do the same thing by hand.
 

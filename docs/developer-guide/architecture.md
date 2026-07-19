@@ -19,6 +19,7 @@ OllMem.sln
 │  │  ├─ Retrieval/               SoftDecayScorer (decay + recency/usage weight)
 │  │  └─ Engine/                  OllMemMemoryEngine (orchestrator)
 │  ├─ OllMem.Models.Ollama/        Model backend: local Ollama server (embeddings + extraction)
+│  ├─ OllMem.Storage.Firestore/    Google Cloud Firestore-backed persistent stores (cloud memory)
 │  ├─ OllMem.Storage.Git/          Git-synced persistent stores (shared memory across machines)
 │  ├─ OllMem.Storage.Sqlite/       SQLite-backed persistent stores
 │  ├─ OllMem.Api/                  ASP.NET Core minimal API + Ed25519 auth middleware
@@ -42,10 +43,10 @@ the stack is untouched.
 |-----------|------|-----------------|--------------------|
 | `IEmbeddingService` | text → L2-normalised vector | `HashingEmbeddingService` | `OllamaEmbeddingService` |
 | `IFactExtractor` | transcript → candidate facts | `RuleBasedFactExtractor` | `OllamaFactExtractor` |
-| `IVectorStore` | semantic half of the hybrid store | `InMemoryVectorStore` | `SqliteHybridStore`, `GitHybridStore` |
-| `IGraphStore` | relationship half of the hybrid store | `InMemoryGraphStore` | `SqliteHybridStore`, `GitHybridStore` |
-| `IBlobStore` | content-addressed encrypted payloads | `InMemoryBlobStore` | `SqliteBlobStore`, `GitBlobStore` |
-| `IAuditLog` | append-only hash-chained log | `HashChainedAuditLog` | `SqliteAuditLog`, `GitAuditLog` |
+| `IVectorStore` | semantic half of the hybrid store | `InMemoryVectorStore` | `SqliteHybridStore`, `GitHybridStore`, `FirestoreHybridStore` |
+| `IGraphStore` | relationship half of the hybrid store | `InMemoryGraphStore` | `SqliteHybridStore`, `GitHybridStore`, `FirestoreHybridStore` |
+| `IBlobStore` | content-addressed encrypted payloads | `InMemoryBlobStore` | `SqliteBlobStore`, `GitBlobStore`, `FirestoreBlobStore` |
+| `IAuditLog` | append-only hash-chained log | `HashChainedAuditLog` | `SqliteAuditLog`, `GitAuditLog`, `FirestoreAuditLog` |
 | `IPayloadCipher` | per-namespace authenticated encryption | `AesGcmPayloadCipher` | — |
 | `ISignatureScheme` | ownership assertion (Ed25519) | `Ed25519SignatureScheme` | — |
 | `IDecayScorer` | non-destructive relevance decay | `SoftDecayScorer` | — |
@@ -56,7 +57,7 @@ Composition happens in the hosts (`OllMem.Api/Program.cs`,
 
 ```csharp
 // Order matters: overrides first, core last.
-builder.Services.AddOllMemGitStorage(...);      // or AddOllMemSqliteStorage(...)
+builder.Services.AddOllMemGitStorage(...);      // or AddOllMemSqliteStorage(...) / AddOllMemFirestoreStorage(...)
 builder.Services.AddOllMemOllamaModels(...);    // model backend
 builder.Services.AddOllMemMemory(o => { ... }); // fills every remaining slot with defaults
 ```
@@ -145,7 +146,7 @@ builder.Services.AddOllMemMemory(o =>
 | REQ-2.2 Conflict resolution | `Engine/OllMemMemoryEngine.StoreFactAsync` |
 | REQ-2.3 Edge encryption | `Security/AesGcmPayloadCipher.cs` |
 | REQ-3.1 Hybrid datastore (graph + vector) | `Storage/InMemoryVectorStore.cs`, `Storage/InMemoryGraphStore.cs` |
-| REQ-3.2 Persistent blob storage | `Storage/InMemoryBlobStore.cs`, `OllMem.Storage.Sqlite/SqliteBlobStore.cs` |
+| REQ-3.2 Persistent blob storage | `Storage/InMemoryBlobStore.cs`, `OllMem.Storage.Sqlite/SqliteBlobStore.cs`, `OllMem.Storage.Firestore/FirestoreBlobStore.cs` |
 | REQ-3.3 Cryptographic audit logs | `Security/HashChainedAuditLog.cs` |
 | REQ-4.1 Soft-decay scoring | `Retrieval/SoftDecayScorer.cs` |
 | REQ-4.2 Time-aware reranking | `Engine/OllMemMemoryEngine.RecallAsync` |
@@ -163,6 +164,8 @@ builder.Services.AddOllMemMemory(o =>
   (MIT) — MCP server SDK
 - [Microsoft.Data.Sqlite](https://learn.microsoft.com/dotnet/standard/data/sqlite/)
   (MIT) — persistent storage
+- [Google.Cloud.Firestore](https://github.com/googleapis/google-cloud-dotnet)
+  (Apache-2.0) — managed cloud persistent storage
 - xUnit + `Microsoft.AspNetCore.Mvc.Testing` — testing
 
 AES-256-GCM, HKDF and SHA-256 come from the .NET base class library.

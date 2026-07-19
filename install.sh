@@ -5,7 +5,12 @@
 #   1. how you want to use OllMem   — MCP server, HTTP API, or both
 #   2. dependencies                 — .NET 10 SDK (and Ollama / git when needed)
 #   3. how memories are matched     — simple keyword matching, or LLM matching via Ollama
-#   4. where memories live          — in-memory, SQLite, or a git-synced repo
+#   4. where memories live          — in-memory, SQLite, a git-synced repo,
+#                                     or Google Cloud Firestore
+#   5. (optional) cloud deployment  — with Firestore persistence the HTTP API
+#                                     can be deployed to Firebase (Cloud Run +
+#                                     Firebase Hosting) so it is reachable from
+#                                     every machine, device and cloud agent
 #
 # It then builds OllMem, writes all configuration (including a freshly
 # generated master encryption key when persistence is on), creates
@@ -64,12 +69,20 @@ Options:
   --ollama-endpoint URL      Ollama server                (default: http://localhost:11434)
   --embed-model NAME         Embedding model              (default: nomic-embed-text)
   --chat-model NAME          Fact-extraction model        (default: llama3.2)
-  --persistence sqlite|git|memory   Where memories live
+  --persistence sqlite|git|firestore|memory   Where memories live
   --sqlite-path PATH         SQLite database file         (default: <prefix>/data/ollmem.db)
   --git-path PATH            Local memory repo            (default: <prefix>/memory)
   --git-remote URL           Remote to sync the memory repo with
   --git-branch NAME          Memory branch                (default: main)
   --git-sync N               Sync interval in seconds     (default: 60)
+  --firestore-project ID     Google Cloud / Firebase project id (firestore persistence)
+  --firestore-database ID    Firestore database id        (default: (default))
+  --firestore-credentials PATH  Service-account JSON (default: Application Default Credentials)
+  --deploy-firebase          Deploy the HTTP API to Firebase (Cloud Run + Hosting)
+                             so OllMem is reachable from everywhere (needs
+                             --mode api|both, --persistence firestore, gcloud CLI)
+  --firebase-project ID      Firebase Hosting project     (default: --firestore-project)
+  --cloud-region REGION      Cloud Run region             (default: us-central1)
   --master-key KEY           Base64 master encryption key (default: reuse existing, else generate)
   --service                  Install a login service for the HTTP API
   --yes, -y                  Non-interactive: never prompt, use flags/defaults
@@ -89,6 +102,8 @@ OPT_MODE=""; OPT_PREFIX=""; OPT_PORT=""; OPT_MATCHING=""
 OPT_OLLAMA_ENDPOINT=""; OPT_EMBED_MODEL=""; OPT_CHAT_MODEL=""
 OPT_PERSISTENCE=""; OPT_SQLITE_PATH=""; OPT_GIT_PATH=""; OPT_GIT_REMOTE=""
 OPT_GIT_BRANCH=""; OPT_GIT_SYNC=""; OPT_MASTER_KEY=""
+OPT_FIRESTORE_PROJECT=""; OPT_FIRESTORE_DATABASE=""; OPT_FIRESTORE_CREDENTIALS=""
+OPT_DEPLOY_FIREBASE=false; OPT_FIREBASE_PROJECT=""; OPT_CLOUD_REGION=""
 OPT_SERVICE=false; OPT_REQUIRE_SIGNATURE=false
 NONINTERACTIVE=false; UNINSTALL=false; PURGE=false
 
@@ -108,6 +123,12 @@ while [ $# -gt 0 ]; do
     --git-branch)      OPT_GIT_BRANCH=${2:?--git-branch needs a value}; shift 2 ;;
     --git-sync)        OPT_GIT_SYNC=${2:?--git-sync needs a value}; shift 2 ;;
     --master-key)      OPT_MASTER_KEY=${2:?--master-key needs a value}; shift 2 ;;
+    --firestore-project)     OPT_FIRESTORE_PROJECT=${2:?--firestore-project needs a value}; shift 2 ;;
+    --firestore-database)    OPT_FIRESTORE_DATABASE=${2:?--firestore-database needs a value}; shift 2 ;;
+    --firestore-credentials) OPT_FIRESTORE_CREDENTIALS=${2:?--firestore-credentials needs a value}; shift 2 ;;
+    --deploy-firebase) OPT_DEPLOY_FIREBASE=true; shift ;;
+    --firebase-project)      OPT_FIREBASE_PROJECT=${2:?--firebase-project needs a value}; shift 2 ;;
+    --cloud-region)    OPT_CLOUD_REGION=${2:?--cloud-region needs a value}; shift 2 ;;
     --require-signature) OPT_REQUIRE_SIGNATURE=true; shift ;;
     --service)         OPT_SERVICE=true; shift ;;
     --yes|-y)          NONINTERACTIVE=true; shift ;;
@@ -318,7 +339,7 @@ do_uninstall() {
 
   # The installation itself.
   rm -rf "$prefix/app" "$prefix/bin" "$prefix/mcp-config.json" \
-         "$prefix/logs" "$prefix"/smoke-*.log
+         "$prefix/logs" "$prefix/deploy" "$prefix"/smoke-*.log
   if $PURGE || confirm "Also delete stored memories, ollmem.env and the MASTER KEY (irreversible)?" n; then
     rm -rf "$prefix"
     info "OllMem removed completely, including all memories."
@@ -344,7 +365,7 @@ REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 if $NONINTERACTIVE; then
   [ -n "$OPT_MODE" ]        || die "--yes needs --mode mcp|api|both"
   [ -n "$OPT_MATCHING" ]    || die "--yes needs --matching llm|simple"
-  [ -n "$OPT_PERSISTENCE" ] || die "--yes needs --persistence sqlite|git|memory"
+  [ -n "$OPT_PERSISTENCE" ] || die "--yes needs --persistence sqlite|git|firestore|memory"
 fi
 
 printf '\n%s\n' "${BOLD}OllMem installer${RESET}"
@@ -432,17 +453,20 @@ fi
 
 if [ -n "$OPT_PERSISTENCE" ]; then
   case "$OPT_PERSISTENCE" in
-    sqlite) PERSISTENCE=1 ;; git) PERSISTENCE=2 ;; memory|in-memory|none) PERSISTENCE=3 ;;
-    *) die "--persistence must be sqlite, git or memory" ;;
+    sqlite) PERSISTENCE=1 ;; git) PERSISTENCE=2 ;; firestore) PERSISTENCE=3 ;;
+    memory|in-memory|none) PERSISTENCE=4 ;;
+    *) die "--persistence must be sqlite, git, firestore or memory" ;;
   esac
 else
   choose PERSISTENCE "Where should memories live?" \
     "SQLite    — one database file on this machine, survives restarts (recommended)" \
     "Git       — a git repo synced across all your machines (one shared memory)" \
+    "Firestore — Google Cloud database, shared by every machine and cloud agent" \
     "In-memory — nothing survives a restart (demos and try-outs)"
 fi
 
 SQLITE_PATH=""; GIT_PATH=""; GIT_REMOTE=""; GIT_BRANCH="main"; GIT_SYNC_SECONDS="60"
+FIRESTORE_PROJECT=""; FIRESTORE_DATABASE="(default)"; FIRESTORE_CREDENTIALS=""
 PERSISTENT=true
 case "$PERSISTENCE" in
   1)
@@ -486,9 +510,59 @@ case "$PERSISTENCE" in
     fi
     ;;
   3)
+    FIRESTORE_PROJECT=$OPT_FIRESTORE_PROJECT
+    if [ -z "$FIRESTORE_PROJECT" ] && ! $NONINTERACTIVE; then
+      note "Firestore is Google's managed cloud database (generous free tier)."
+      note "You need a Google Cloud / Firebase project with Firestore enabled:"
+      note "  https://console.firebase.google.com → create project → Firestore Database"
+      ask FIRESTORE_PROJECT "Google Cloud / Firebase project id" ""
+    fi
+    [ -n "$FIRESTORE_PROJECT" ] || die "Firestore persistence needs a project id (--firestore-project)"
+    if [ -n "$OPT_FIRESTORE_DATABASE" ]; then
+      FIRESTORE_DATABASE=$OPT_FIRESTORE_DATABASE
+    else
+      ask FIRESTORE_DATABASE "Firestore database id" "(default)"
+    fi
+    FIRESTORE_CREDENTIALS=$OPT_FIRESTORE_CREDENTIALS
+    if [ -z "$FIRESTORE_CREDENTIALS" ] && ! $NONINTERACTIVE; then
+      note "Leave empty to use Application Default Credentials"
+      note "(gcloud auth application-default login), or give a service-account JSON."
+      ask FIRESTORE_CREDENTIALS "Service-account credentials file (optional)" ""
+    fi
+    [ -n "$FIRESTORE_CREDENTIALS" ] && expand_tilde FIRESTORE_CREDENTIALS
+    ;;
+  4)
     PERSISTENT=false
     ;;
 esac
+
+# --- Optional cloud deployment (Firebase Hosting + Cloud Run) ----------------
+# Only meaningful with the HTTP API and Firestore persistence: the deployed
+# API and your local install then share the same cloud memory.
+
+DEPLOY_FIREBASE=false
+FIREBASE_PROJECT=""; CLOUD_REGION="us-central1"
+if $OPT_DEPLOY_FIREBASE; then
+  $INSTALL_API || die "--deploy-firebase needs the HTTP API (--mode api or both)"
+  [ "$PERSISTENCE" = 3 ] || die "--deploy-firebase needs --persistence firestore (cloud instances have no local disk to keep SQLite/git memory on)"
+  DEPLOY_FIREBASE=true
+elif $INSTALL_API && [ "$PERSISTENCE" = 3 ] && ! $NONINTERACTIVE; then
+  printf '\n'
+  note "With Firestore persistence the HTTP API can also run in the cloud:"
+  note "Cloud Run hosts the API, Firebase Hosting gives it a stable https URL,"
+  note "and every machine or cloud agent talks to the same memory."
+  if confirm "Deploy the OllMem API to Firebase (Cloud Run + Hosting) after the local install?" n; then
+    DEPLOY_FIREBASE=true
+  fi
+fi
+if $DEPLOY_FIREBASE; then
+  FIREBASE_PROJECT=${OPT_FIREBASE_PROJECT:-$FIRESTORE_PROJECT}
+  if [ -n "$OPT_CLOUD_REGION" ]; then
+    CLOUD_REGION=$OPT_CLOUD_REGION
+  elif ! $NONINTERACTIVE; then
+    ask CLOUD_REGION "Cloud Run region" "us-central1"
+  fi
+fi
 
 # --- Master encryption key -------------------------------------------------
 # Every memory is encrypted at rest; persistent storage needs a stable key.
@@ -567,6 +641,31 @@ if [ "$PERSISTENCE" = 2 ]; then
       fi
     fi
   fi
+fi
+
+# Google Cloud credentials — needed by Firestore persistence and deployment.
+if [ "$PERSISTENCE" = 3 ]; then
+  if [ -n "$FIRESTORE_CREDENTIALS" ]; then
+    [ -f "$FIRESTORE_CREDENTIALS" ] || die "credentials file not found: $FIRESTORE_CREDENTIALS"
+    note "Firestore will authenticate with $FIRESTORE_CREDENTIALS"
+  elif [ -n "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
+    note "Firestore will authenticate with \$GOOGLE_APPLICATION_CREDENTIALS"
+  elif [ -f "${CLOUDSDK_CONFIG:-$HOME/.config/gcloud}/application_default_credentials.json" ]; then
+    note "Firestore will authenticate with your gcloud Application Default Credentials"
+  else
+    warn "no Google Cloud credentials found — OllMem will fail to reach Firestore"
+    note "fix it with: gcloud auth application-default login"
+    note "or re-run with --firestore-credentials <service-account.json>"
+    if ! $NONINTERACTIVE; then
+      confirm "Continue anyway?" y || die "aborted — set up credentials and re-run"
+    fi
+  fi
+fi
+if $DEPLOY_FIREBASE; then
+  command -v gcloud >/dev/null 2>&1 \
+    || die "deploying to Firebase needs the gcloud CLI — https://cloud.google.com/sdk/docs/install"
+  command -v firebase >/dev/null 2>&1 \
+    || warn "firebase CLI not found (npm i -g firebase-tools) — you'll get the Cloud Run URL, but the Firebase Hosting step will be skipped"
 fi
 
 # .NET 10 SDK — builds and runs OllMem.
@@ -706,6 +805,17 @@ info "Writing configuration to $ENV_FILE"
       echo "OllMem__Git__SyncIntervalSeconds='$GIT_SYNC_SECONDS'"
       ;;
     3)
+      echo "# Persistence: Google Cloud Firestore"
+      echo "OLLMEM_FIRESTORE_PROJECT='$FIRESTORE_PROJECT'"
+      echo "OllMem__Firestore__ProjectId='$FIRESTORE_PROJECT'"
+      echo "OLLMEM_FIRESTORE_DATABASE='$FIRESTORE_DATABASE'"
+      echo "OllMem__Firestore__DatabaseId='$FIRESTORE_DATABASE'"
+      if [ -n "$FIRESTORE_CREDENTIALS" ]; then
+        echo "OLLMEM_FIRESTORE_CREDENTIALS='$FIRESTORE_CREDENTIALS'"
+        echo "OllMem__Firestore__CredentialsPath='$FIRESTORE_CREDENTIALS'"
+      fi
+      ;;
+    4)
       echo "# Persistence: in-memory (nothing survives a restart)"
       ;;
   esac
@@ -916,7 +1026,82 @@ EOF
 fi
 
 # ---------------------------------------------------------------------------
-# 11. Register the MCP server with your AI tools
+# 11. Deploy to Firebase (Cloud Run + Firebase Hosting) — optional
+# ---------------------------------------------------------------------------
+# Firebase Hosting cannot run .NET itself, so the API runs on Cloud Run and
+# Hosting fronts it with a stable https://<project>.web.app URL. Both talk to
+# the same Firestore memory as the local install.
+
+DEPLOY_STATE="not requested"; CLOUD_RUN_URL=""; HOSTING_URL=""
+
+do_firebase_deploy() {
+  local svc="ollmem-api" deploy_dir="$PREFIX/deploy/firebase"
+
+  info "Deploying the OllMem API to Cloud Run (project: $FIREBASE_PROJECT, region: $CLOUD_REGION)"
+  note "Cloud Build builds the repo's Dockerfile remotely — the first run takes a few minutes."
+  note "The cloud API always requires Ed25519-signed requests (it is public)."
+
+  # ^@^ makes '@' the list separator, so the base64 master key ('=', '+', '/')
+  # passes through --set-env-vars unharmed.
+  local envs="^@^OllMem__Firestore__ProjectId=$FIRESTORE_PROJECT"
+  envs="$envs@OllMem__Firestore__DatabaseId=$FIRESTORE_DATABASE"
+  envs="$envs@OllMem__MasterKeyBase64=$MASTER_KEY"
+  envs="$envs@OllMem__RequireSignature=true"
+  envs="$envs@OllMem__Ollama__Enabled=false"
+
+  gcloud run deploy "$svc" \
+      --source "$REPO_ROOT" \
+      --project "$FIREBASE_PROJECT" \
+      --region "$CLOUD_REGION" \
+      --allow-unauthenticated \
+      --set-env-vars "$envs" \
+    || { warn "Cloud Run deployment failed — fix the error above and re-run ./install.sh"; return 1; }
+
+  CLOUD_RUN_URL=$(gcloud run services describe "$svc" --project "$FIREBASE_PROJECT" \
+      --region "$CLOUD_REGION" --format='value(status.url)' 2>/dev/null || true)
+  DEPLOY_STATE="Cloud Run"
+
+  if ! command -v firebase >/dev/null 2>&1; then
+    warn "firebase CLI not found — skipping the Firebase Hosting front (the Cloud Run URL works on its own)"
+    note "install it later with: npm i -g firebase-tools, then re-run the installer"
+    return 0
+  fi
+
+  mkdir -p "$deploy_dir/public"
+  cat > "$deploy_dir/firebase.json" <<EOF
+{
+  "hosting": {
+    "public": "public",
+    "rewrites": [
+      { "source": "**", "run": { "serviceId": "$svc", "region": "$CLOUD_REGION" } }
+    ]
+  }
+}
+EOF
+  cat > "$deploy_dir/.firebaserc" <<EOF
+{ "projects": { "default": "$FIREBASE_PROJECT" } }
+EOF
+  cat > "$deploy_dir/public/index.html" <<'EOF'
+<!doctype html><title>OllMem</title><p>OllMem memory API. Try <a href="/health">/health</a>.</p>
+EOF
+
+  if (cd "$deploy_dir" && firebase deploy --only hosting --project "$FIREBASE_PROJECT"); then
+    HOSTING_URL="https://$FIREBASE_PROJECT.web.app"
+    DEPLOY_STATE="Cloud Run + Firebase Hosting"
+  else
+    warn "Firebase Hosting deploy failed — the Cloud Run URL still works"
+    note "deploy config kept in $deploy_dir; retry with: (cd $deploy_dir && firebase deploy --only hosting)"
+  fi
+  return 0
+}
+
+if $DEPLOY_FIREBASE; then
+  printf '\n'
+  do_firebase_deploy || DEPLOY_STATE="FAILED"
+fi
+
+# ---------------------------------------------------------------------------
+# 12. Register the MCP server with your AI tools
 # ---------------------------------------------------------------------------
 
 REGISTERED=""; MANUAL_HINTS=""
@@ -1008,7 +1193,7 @@ EOF
 fi
 
 # ---------------------------------------------------------------------------
-# 12. Summary
+# 13. Summary
 # ---------------------------------------------------------------------------
 
 printf '\n%s\n\n' "${BOLD}${GREEN}OllMem is installed.${RESET}"
@@ -1018,7 +1203,8 @@ echo "  Configuration: $ENV_FILE"
 case "$PERSISTENCE" in
   1) echo "  Persistence:   SQLite → $SQLITE_PATH" ;;
   2) echo "  Persistence:   git → $GIT_PATH${GIT_REMOTE:+  (remote: yes)}" ;;
-  3) echo "  Persistence:   in-memory (nothing survives a restart)" ;;
+  3) echo "  Persistence:   Firestore → project $FIRESTORE_PROJECT (database: $FIRESTORE_DATABASE)" ;;
+  4) echo "  Persistence:   in-memory (nothing survives a restart)" ;;
 esac
 if $USE_OLLAMA; then
   echo "  Matching:      LLM via Ollama ($OLLAMA_ENDPOINT — $EMBED_MODEL / $CHAT_MODEL)"
@@ -1046,6 +1232,16 @@ if $INSTALL_API; then
     echo "  Signing:              required — mint a keypair with POST /v1/keypair"
   fi
 fi
+if $DEPLOY_FIREBASE; then
+  echo "  Cloud deployment:     $DEPLOY_STATE"
+  [ -n "$HOSTING_URL" ]   && echo "                        → $HOSTING_URL  (use from everywhere)"
+  [ -n "$CLOUD_RUN_URL" ] && echo "                        → $CLOUD_RUN_URL  (direct Cloud Run URL)"
+  if [ "$DEPLOY_STATE" != "FAILED" ]; then
+    echo "  Cloud signing:        the cloud API only accepts Ed25519-signed requests."
+    echo "                        Mint a keypair on your LOCAL API (POST /v1/keypair) and"
+    echo "                        sign requests with it — see docs/user-guide/configuration.md"
+  fi
+fi
 if $INSTALL_MCP; then
   echo "  MCP server command:   $MCP_CMD"
   echo "  MCP client snippet:   $PREFIX/mcp-config.json"
@@ -1063,7 +1259,7 @@ printf '\n'
 if $NEW_KEY; then
   warn "a new master encryption key was generated and stored in $ENV_FILE."
   echo "  ${BOLD}Back it up somewhere safe — lose the key and the memories are gone.${RESET}"
-  if [ "$PERSISTENCE" = 2 ] && [ -n "$GIT_REMOTE" ]; then
+  if { [ "$PERSISTENCE" = 2 ] && [ -n "$GIT_REMOTE" ]; } || [ "$PERSISTENCE" = 3 ]; then
     echo "  Sharing memory across machines? Use the ${BOLD}same key${RESET} on every machine"
     echo "  (choose 'I already have one' when installing there)."
   fi

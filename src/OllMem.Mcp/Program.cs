@@ -1,5 +1,6 @@
 using OllMem.Core;
 using OllMem.Models.Ollama;
+using OllMem.Storage.Firestore;
 using OllMem.Storage.Git;
 using OllMem.Storage.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,9 +18,12 @@ builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
 // Opt into persistent storage, registered before AddOllMemMemory so it wins.
 // OLLMEM_GIT_PATH selects git-backed storage (set OLLMEM_GIT_REMOTE to share the
 // memory across machines; OLLMEM_GIT_BRANCH / OLLMEM_GIT_SYNC_SECONDS tune it),
-// otherwise OLLMEM_SQLITE_PATH selects SQLite; with neither set, memory is
+// then OLLMEM_FIRESTORE_PROJECT selects Google Cloud Firestore (managed cloud
+// memory; OLLMEM_FIRESTORE_DATABASE / OLLMEM_FIRESTORE_CREDENTIALS tune it),
+// otherwise OLLMEM_SQLITE_PATH selects SQLite; with none set, memory is
 // in-process only.
 var gitPath = Environment.GetEnvironmentVariable("OLLMEM_GIT_PATH");
+var firestoreProject = Environment.GetEnvironmentVariable("OLLMEM_FIRESTORE_PROJECT");
 var sqlitePath = Environment.GetEnvironmentVariable("OLLMEM_SQLITE_PATH");
 if (!string.IsNullOrWhiteSpace(gitPath))
 {
@@ -30,6 +34,16 @@ if (!string.IsNullOrWhiteSpace(gitPath))
         o.Branch = Environment.GetEnvironmentVariable("OLLMEM_GIT_BRANCH") ?? o.Branch;
         if (int.TryParse(Environment.GetEnvironmentVariable("OLLMEM_GIT_SYNC_SECONDS"), out var seconds))
             o.SyncIntervalSeconds = seconds;
+    });
+}
+else if (!string.IsNullOrWhiteSpace(firestoreProject))
+{
+    builder.Services.AddOllMemFirestoreStorage(o =>
+    {
+        o.ProjectId = firestoreProject;
+        o.DatabaseId = Environment.GetEnvironmentVariable("OLLMEM_FIRESTORE_DATABASE") ?? o.DatabaseId;
+        o.CollectionPrefix = Environment.GetEnvironmentVariable("OLLMEM_FIRESTORE_PREFIX") ?? o.CollectionPrefix;
+        o.CredentialsPath = Environment.GetEnvironmentVariable("OLLMEM_FIRESTORE_CREDENTIALS");
     });
 }
 else if (!string.IsNullOrWhiteSpace(sqlitePath))

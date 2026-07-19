@@ -1,15 +1,15 @@
 # Extending storage
 
 All persistence sits behind four interfaces. The in-memory defaults, the
-SQLite backend and the git backend are three complete implementations you can
-crib from:
+SQLite backend, the git backend and the Firestore backend are four complete
+implementations you can crib from:
 
-| Interface | Role | In-memory | SQLite | Git | Swap in… |
-|-----------|------|-----------|--------|-----|----------|
-| `IVectorStore` | nodes + similarity search | `InMemoryVectorStore` | `SqliteHybridStore` | `GitHybridStore` | ANN index (HNSW, pgvector, …) |
-| `IGraphStore` | relationship edges | `InMemoryGraphStore` | `SqliteHybridStore` | `GitHybridStore` | a graph database |
-| `IBlobStore` | content-addressed encrypted payloads | `InMemoryBlobStore` | `SqliteBlobStore` | `GitBlobStore` | Walrus / IPFS / S3 |
-| `IAuditLog` | append-only hash chain | `HashChainedAuditLog` | `SqliteAuditLog` | `GitAuditLog` | an external ledger |
+| Interface | Role | In-memory | SQLite | Git | Firestore | Swap in… |
+|-----------|------|-----------|--------|-----|-----------|----------|
+| `IVectorStore` | nodes + similarity search | `InMemoryVectorStore` | `SqliteHybridStore` | `GitHybridStore` | `FirestoreHybridStore` | ANN index (HNSW, pgvector, …) |
+| `IGraphStore` | relationship edges | `InMemoryGraphStore` | `SqliteHybridStore` | `GitHybridStore` | `FirestoreHybridStore` | a graph database |
+| `IBlobStore` | content-addressed encrypted payloads | `InMemoryBlobStore` | `SqliteBlobStore` | `GitBlobStore` | `FirestoreBlobStore` | Walrus / IPFS / S3 |
+| `IAuditLog` | append-only hash chain | `HashChainedAuditLog` | `SqliteAuditLog` | `GitAuditLog` | `FirestoreAuditLog` | an external ledger |
 
 As with models, the mechanism is DI ordering: the core registers defaults with
 `TryAdd*`, so **register your stores before `AddOllMemMemory()`** and they
@@ -46,7 +46,8 @@ Contract notes:
   enough. Decay/reranking happens in the engine — don't apply it here.
 - **Skip, don't crash, on dimension mismatch.** If a stored embedding's length
   differs from the query's (the database predates an embedding-model switch),
-  exclude that node from search results. Both persistent backends do this.
+  exclude that node from search results. All three persistent backends do
+  this.
 - `UpsertAsync` is also how the engine updates access stats and marks nodes
   `Superseded` — treat it as insert-or-replace by `node.Id`.
 
@@ -76,10 +77,12 @@ Contract notes:
 ### The hybrid-store pattern
 
 Vector and graph views must stay consistent: superseding a fact has to update
-both atomically. Both persistent backends therefore implement `IVectorStore`
-**and** `IGraphStore` in one class over one storage unit — `SqliteHybridStore`
-(a single `memories` table), `GitHybridStore` (one JSON document per node) —
-and register the same instance for both interfaces:
+both atomically. All three persistent backends therefore implement
+`IVectorStore` **and** `IGraphStore` in one class over one storage unit —
+`SqliteHybridStore` (a single `memories` table), `GitHybridStore` (one JSON
+document per node), `FirestoreHybridStore` (one `memories` collection,
+equality-filter queries only so no composite indexes are needed) — and
+register the same instance for both interfaces:
 
 ```csharp
 services.TryAddSingleton<MyHybridStore>();
@@ -108,7 +111,9 @@ Contract notes:
   stores use SHA-256 hex). Identical payloads dedupe for free, references are
   independently verifiable, and — as the git backend exploits — content-
   addressed files can never merge-conflict. This is deliberately the contract
-  a Walrus/IPFS CID would satisfy.
+  a Walrus/IPFS CID would satisfy. `FirestoreBlobStore` uses the hash as the
+  document id for the same reason: re-putting identical bytes is an idempotent
+  overwrite, not a conflict.
 - `GetAsync` returns null for an unknown reference rather than throwing.
 
 ## `IAuditLog` — the tamper-evident chain
@@ -135,10 +140,18 @@ Contract notes:
   The git backend's answer: one append-only chain **per writer**
   (`audit/<writer-id>.jsonl`), each independently verifiable, `ReadAsync`
   merging them by timestamp. Copy that design for any distributed target.
+  `FirestoreAuditLog` takes a different tack that also works for concurrent
+  writers to one *shared* chain: `AppendAsync` runs inside a Firestore
+  transaction that reads the tip (sequence + hash) from a meta document,
+  writes the new entry, and advances the tip — Firestore's optimistic
+  concurrency control on the transaction rejects (and the caller retries) if
+  another writer raced it, so the chain never forks.
 
 ## Packaging a backend
 
-Follow `OllMem.Storage.Sqlite` (simple) or `OllMem.Storage.Git` (advanced —
+Follow `OllMem.Storage.Sqlite` (simple), `OllMem.Storage.Firestore` (a managed
+cloud service — no schema migrations, no connection pooling to hand-roll,
+just an options class and a client SDK), or `OllMem.Storage.Git` (advanced —
 options class, background sync, hosted-service lifecycle):
 
 - One `AddOllMemMyStorage(...)` extension registering everything with
@@ -146,11 +159,12 @@ options class, background sync, hosted-service lifecycle):
 - Wire configuration in the hosts the way the existing backends do
   (`OllMem.Api/Program.cs` binds an `OllMem:*` section; `OllMem.Mcp/Program.cs`
   reads `OLLMEM_*` environment variables).
-- Reuse the test suites: `SqlitePersistenceTests.cs` and
-  `GitPersistenceTests.cs` in `tests/OllMem.Core.Tests` exercise the full
-  store contract (persistence across restarts, supersede consistency,
-  dimension-mismatch skipping, audit-chain integrity) and adapt readily to a
-  new backend.
+- Reuse the test suites: `SqlitePersistenceTests.cs`, `GitPersistenceTests.cs`
+  and `FirestorePersistenceTests.cs` (gated on `FIRESTORE_EMULATOR_HOST` being
+  set, so it's a no-op without a running emulator) in `tests/OllMem.Core.Tests`
+  exercise the full store contract (persistence across restarts, supersede
+  consistency, dimension-mismatch skipping, audit-chain integrity) and adapt
+  readily to a new backend.
 
 ## Things every store must respect
 

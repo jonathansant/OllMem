@@ -4,6 +4,7 @@
     <Project Path="src/OllMem.Core/OllMem.Core.csproj" />
     <Project Path="src/OllMem.Mcp/OllMem.Mcp.csproj" />
     <Project Path="src/OllMem.Models.Ollama/OllMem.Models.Ollama.csproj" />
+    <Project Path="src/OllMem.Storage.Firestore/OllMem.Storage.Firestore.csproj" />
     <Project Path="src/OllMem.Storage.Git/OllMem.Storage.Git.csproj" />
     <Project Path="src/OllMem.Storage.Sqlite/OllMem.Storage.Sqlite.csproj" />
   </Folder>
