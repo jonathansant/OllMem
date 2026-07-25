@@ -1,4 +1,5 @@
 using OllMem.Core.Abstractions;
+using OllMem.Core.Domain;
 
 namespace OllMem.Core.Storage;
 
@@ -61,6 +62,21 @@ public sealed class InMemoryOwnerLinkStore : IOwnerLinkStore
         }
 
         return ValueTask.FromResult<IReadOnlySet<string>>(closure);
+    }
+
+    public ValueTask<IReadOnlyList<OwnerLink>> GetAllLinksAsync(CancellationToken ct = default)
+    {
+        var links = new HashSet<OwnerLink>();
+        lock (_gate)
+        {
+            foreach (var (owner, neighbours) in _edges)
+            {
+                foreach (var other in neighbours)
+                    links.Add(OwnerLink.Create(owner, other));
+            }
+        }
+
+        return ValueTask.FromResult<IReadOnlyList<OwnerLink>>(links.ToList());
     }
 
     // Only called from the write paths, so an unknown owner is genuinely being

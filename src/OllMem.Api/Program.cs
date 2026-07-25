@@ -136,18 +136,21 @@ v1.MapGet("/neighbors", async (
 // spans every namespace; owner (+ scope/scopeId) narrows it to one.
 v1.MapGet("/graph", async (
     string? owner, string? scope, string? scopeId,
-    HttpContext ctx, IVectorStore vectors, CancellationToken ct) =>
+    string? fromOwner, string? fromScope, string? fromScopeId,
+    HttpContext ctx, IVectorStore vectors, IMemoryEngine engine, CancellationToken ct) =>
 {
+    // Signature auth compartmentalises namespaces (REQ-1.3): a verified caller
+    // only ever sees namespaces belonging to their signing key. Owner links do
+    // NOT widen this — linking is not an authenticated operation, so honouring
+    // it here would let a link created elsewhere unlock another tenant's data.
+    var verifiedOwner = ctx.Items.TryGetValue(SignatureAuthMiddleware.OwnerItemKey, out var v)
+        ? v as string
+        : null;
+
     IReadOnlyList<MemoryNode> memories;
     if (string.IsNullOrWhiteSpace(owner))
     {
         var all = await vectors.ListAllActiveAsync(ct);
-
-        // Signature auth compartmentalises namespaces (REQ-1.3): a verified
-        // caller only ever sees namespaces belonging to their signing key.
-        var verifiedOwner = ctx.Items.TryGetValue(SignatureAuthMiddleware.OwnerItemKey, out var v)
-            ? v as string
-            : null;
         memories = verifiedOwner is null
             ? all
             : all.Where(n => string.Equals(n.Namespace.Owner, verifiedOwner, StringComparison.OrdinalIgnoreCase)).ToList();
@@ -160,7 +163,31 @@ v1.MapGet("/graph", async (
         memories = await vectors.ListActiveAsync(ns, ct);
     }
 
-    return Results.Ok(GraphResponse.From(memories));
+    var links = await engine.GetAllOwnerLinksAsync(ct);
+    if (verifiedOwner is not null)
+    {
+        // Show the caller their own links only — never other tenants' topology.
+        links = links
+            .Where(l => string.Equals(l.OwnerA, verifiedOwner, StringComparison.OrdinalIgnoreCase)
+                     || string.Equals(l.OwnerB, verifiedOwner, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    // Optional viewpoint: score every namespace the way recall would, so the
+    // visualizer can show reach without duplicating the scoring rules.
+    Namespace? viewpoint = null;
+    IReadOnlySet<string>? viewpointOwners = null;
+    if (!string.IsNullOrWhiteSpace(fromOwner))
+    {
+        if (!NamespaceResolver.TryParseScope(fromScope ?? "user", out var parsedScope))
+            return Results.BadRequest(new { error = "fromScope must be one of: user, agent, session" });
+
+        viewpoint = new Namespace(
+            fromOwner!, parsedScope, string.IsNullOrWhiteSpace(fromScopeId) ? "default" : fromScopeId!);
+        viewpointOwners = await engine.GetLinkedOwnersAsync(fromOwner!, ct);
+    }
+
+    return Results.Ok(GraphResponse.From(memories, links, viewpoint, viewpointOwners));
 });
 
 // Cryptographic audit log inspection + integrity check (REQ-3.3).

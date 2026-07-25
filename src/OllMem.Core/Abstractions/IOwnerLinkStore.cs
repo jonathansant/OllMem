@@ -1,3 +1,5 @@
+using OllMem.Core.Domain;
+
 namespace OllMem.Core.Abstractions;
 
 /// <summary>
@@ -22,4 +24,11 @@ public interface IOwnerLinkStore
     /// owner itself, following links transitively.
     /// </summary>
     ValueTask<IReadOnlySet<string>> GetLinkedOwnersAsync(string owner, CancellationToken ct = default);
+
+    /// <summary>
+    /// Every declared link, once per pair in canonical form. Intended for
+    /// visualisation and administration, not for the recall hot path — use
+    /// <see cref="GetLinkedOwnersAsync"/> there.
+    /// </summary>
+    ValueTask<IReadOnlyList<OwnerLink>> GetAllLinksAsync(CancellationToken ct = default);
 }

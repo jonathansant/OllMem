@@ -1,4 +1,5 @@
 using OllMem.Core.Abstractions;
+using OllMem.Core.Domain;
 
 namespace OllMem.Storage.Sqlite;
 
@@ -70,6 +71,20 @@ public sealed class SqliteOwnerLinkStore : IOwnerLinkStore
         }
 
         return closure;
+    }
+
+    public async ValueTask<IReadOnlyList<OwnerLink>> GetAllLinksAsync(CancellationToken ct = default)
+    {
+        await using var conn = _ctx.OpenConnection();
+        await using var cmd = conn.CreateCommand();
+        // Both directions are stored; owner_a < owner_b yields each pair once.
+        cmd.CommandText = "SELECT owner_a, owner_b FROM owner_links WHERE owner_a < owner_b";
+
+        var links = new List<OwnerLink>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            links.Add(OwnerLink.Create(reader.GetString(0), reader.GetString(1)));
+        return links;
     }
 
     private static string Normalize(string owner) => owner.Trim().ToLowerInvariant();

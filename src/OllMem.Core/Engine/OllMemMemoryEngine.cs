@@ -238,6 +238,9 @@ public sealed class OllMemMemoryEngine : IMemoryEngine
     public ValueTask<IReadOnlySet<string>> GetLinkedOwnersAsync(string owner, CancellationToken ct = default) =>
         _ownerLinks.GetLinkedOwnersAsync(owner, ct);
 
+    public ValueTask<IReadOnlyList<OwnerLink>> GetAllOwnerLinksAsync(CancellationToken ct = default) =>
+        _ownerLinks.GetAllLinksAsync(ct);
+
     private void Touch(MemoryNode node)
     {
         node.LastAccessedAt = _clock.GetUtcNow();

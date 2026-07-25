@@ -1,4 +1,5 @@
 using OllMem.Core.Domain;
+using OllMem.Core.Engine;
 
 namespace OllMem.Api;
 
@@ -83,7 +84,21 @@ public sealed record ScoredMemoryDto(
 public sealed record KeyPairResponse(string PublicKeyHex, string PrivateKeyHex);
 
 /// <summary>A namespace present in the graph dump served to the browser visualizer.</summary>
-public sealed record GraphNamespaceDto(string Key, string Owner, string Scope, string ScopeId, int MemoryCount);
+/// <param name="Affinity">
+/// When the request supplies a viewpoint (fromOwner/fromScope/fromScopeId), the
+/// namespace-affinity weight recall would apply to this namespace from there —
+/// 1.0 for the viewpoint itself, lower for siblings and linked identities.
+/// <c>null</c> means recall from the viewpoint cannot reach this namespace at
+/// all, or that no viewpoint was supplied.
+/// </param>
+public sealed record GraphNamespaceDto(
+    string Key, string Owner, string Scope, string ScopeId, int MemoryCount, double? Affinity);
+
+/// <summary>A declared equivalence between two owner identities.</summary>
+public sealed record OwnerLinkDto(string OwnerA, string OwnerB)
+{
+    public static OwnerLinkDto From(OwnerLink l) => new(l.OwnerA, l.OwnerB);
+}
 
 /// <summary>An entity in the graph dump; entities are scoped to their namespace.</summary>
 public sealed record GraphNodeDto(string Id, string Ns, int Degree);
@@ -108,9 +123,23 @@ public sealed record GraphEdgeDto(
 public sealed record GraphResponse(
     IReadOnlyList<GraphNamespaceDto> Namespaces,
     IReadOnlyList<GraphNodeDto> Nodes,
-    IReadOnlyList<GraphEdgeDto> Edges)
+    IReadOnlyList<GraphEdgeDto> Edges,
+    IReadOnlyList<OwnerLinkDto> OwnerLinks)
 {
-    public static GraphResponse From(IReadOnlyList<MemoryNode> memories)
+    /// <param name="viewpoint">
+    /// Optional namespace to score every other namespace against, so the
+    /// visualizer can show what a recall from there would reach without
+    /// reimplementing <see cref="NamespaceAffinityScorer"/> in the browser.
+    /// </param>
+    /// <param name="viewpointLinkedOwners">
+    /// Owners linked to <paramref name="viewpoint"/>'s owner (including itself).
+    /// Namespaces outside this set are unreachable and get a null affinity.
+    /// </param>
+    public static GraphResponse From(
+        IReadOnlyList<MemoryNode> memories,
+        IReadOnlyList<OwnerLink> ownerLinks,
+        Namespace? viewpoint = null,
+        IReadOnlySet<string>? viewpointLinkedOwners = null)
     {
         var edges = memories.Select(GraphEdgeDto.From).ToList();
 
@@ -130,11 +159,25 @@ public sealed record GraphResponse(
             {
                 var ns = g.First().Namespace;
                 return new GraphNamespaceDto(
-                    ns.Key, ns.Owner, ns.Scope.ToString().ToLowerInvariant(), ns.ScopeId, g.Count());
+                    ns.Key, ns.Owner, ns.Scope.ToString().ToLowerInvariant(), ns.ScopeId, g.Count(),
+                    Affinity(ns, viewpoint, viewpointLinkedOwners));
             })
             .OrderBy(n => n.Key)
             .ToList();
 
-        return new GraphResponse(namespaces, nodes, edges);
+        return new GraphResponse(
+            namespaces, nodes, edges, ownerLinks.Select(OwnerLinkDto.From).ToList());
+    }
+
+    // Mirrors what RecallAsync does: an owner outside the viewpoint's linked set
+    // is filtered out entirely rather than down-weighted, so it has no affinity.
+    private static double? Affinity(
+        Namespace candidate, Namespace? viewpoint, IReadOnlySet<string>? linkedOwners)
+    {
+        if (viewpoint is not { } from)
+            return null;
+        if (linkedOwners is not null && !linkedOwners.Contains(candidate.Owner))
+            return null;
+        return NamespaceAffinityScorer.Score(from, candidate, linkedOwners);
     }
 }

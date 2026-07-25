@@ -15,6 +15,7 @@
     --edge: #3d4655;
     --edge-hi: #4fa3ff;
     --danger: #f47067;
+    --ok: #3fb950;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
@@ -35,31 +36,49 @@
     padding: 6px 9px; font: inherit;
   }
   input:focus, select:focus { outline: none; border-color: var(--accent); }
-  #owner { width: 190px; }
-  #scopeId { width: 110px; }
-  #search { width: 160px; }
+  .group {
+    display: flex; align-items: center; gap: 6px;
+    padding: 3px 8px 3px 10px; border: 1px solid var(--border); border-radius: 8px;
+  }
+  .group > .lbl { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+  #owner { width: 150px; }
+  #scopeId { width: 96px; }
+  #search { width: 300px; }
   button { cursor: pointer; }
   button.primary { background: var(--accent); border-color: var(--accent); color: #08131f; font-weight: 600; }
   button:hover { border-color: var(--accent); }
-  #status { color: var(--muted); font-size: 12px; margin-left: auto; white-space: nowrap; }
+  button.ghost { padding: 5px 8px; font-size: 12px; color: var(--muted); }
+  #status { color: var(--muted); font-size: 12px; margin-left: auto; text-align: right; }
   #status.error { color: var(--danger); }
-  #nsbar {
+  .bar {
     display: none; flex-wrap: wrap; gap: 6px; align-items: center;
-    padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--border);
+    padding: 7px 14px; background: var(--panel); border-bottom: 1px solid var(--border);
   }
-  #nsbar.open { display: flex; }
-  #nsbar .hint { color: var(--muted); font-size: 12px; margin-right: 4px; }
+  .bar.open { display: flex; }
+  .bar .hint {
+    color: var(--muted); font-size: 11px; margin-right: 4px;
+    text-transform: uppercase; letter-spacing: .04em; white-space: nowrap;
+  }
   .chip {
     display: inline-flex; align-items: center; gap: 6px;
     border: 1px solid var(--border); border-radius: 999px;
     padding: 3px 10px; font-size: 12px; cursor: pointer; user-select: none;
-    background: var(--bg);
+    background: var(--bg); white-space: nowrap;
   }
   .chip:hover { border-color: var(--accent); }
   .chip .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
-  .chip .count { color: var(--muted); }
+  .chip .count, .chip .aff { color: var(--muted); }
+  .chip .aff.none { color: var(--danger); }
   .chip.off { opacity: 0.35; }
   .chip.off .dot { background: var(--muted) !important; }
+  .badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 15px; height: 15px; border-radius: 4px; flex: none;
+    font-size: 10px; font-weight: 700; color: #08131f;
+  }
+  .idchip { cursor: pointer; }
+  .idchip .owners { display: inline-flex; align-items: center; gap: 4px; }
+  .idchip .arrow { color: var(--muted); }
   main { flex: 1; display: flex; min-height: 0; }
   #canvas-wrap { flex: 1; position: relative; min-width: 0; }
   svg { width: 100%; height: 100%; display: block; cursor: grab; }
@@ -70,8 +89,9 @@
     color: var(--muted); pointer-events: none; text-align: center; padding: 0 30px;
   }
   #empty b { color: var(--text); font-size: 16px; }
+  #empty code { color: var(--accent); }
   aside {
-    width: 320px; background: var(--panel); border-left: 1px solid var(--border);
+    width: 340px; background: var(--panel); border-left: 1px solid var(--border);
     padding: 14px; overflow-y: auto; display: none;
   }
   aside.open { display: block; }
@@ -81,45 +101,71 @@
     border: 1px solid var(--border); border-radius: 8px;
     padding: 9px 11px; margin-bottom: 9px; background: var(--bg);
   }
+  .mem.hit { border-color: var(--accent); }
   .mem .triple { font-size: 12px; color: var(--accent); margin-bottom: 4px; word-break: break-word; }
   .mem .stmt { word-break: break-word; }
   .mem .meta { color: var(--muted); font-size: 11px; margin-top: 6px; word-break: break-word; }
   .node circle { stroke: #0e1116; stroke-width: 1.5; cursor: pointer; }
-  .node.dim { opacity: 0.15; }
-  .node.selected circle, .node:hover circle { stroke: var(--accent); stroke-width: 2.5; }
+  .node.dim { opacity: 0.12; }
+  .node.selected circle, .node:hover circle { stroke: var(--accent) !important; stroke-width: 2.5; }
   .node text {
     fill: var(--text); font-size: 11px; pointer-events: none;
     paint-order: stroke; stroke: var(--bg); stroke-width: 3px;
   }
   .link { stroke: var(--edge); stroke-width: 1.4; fill: none; cursor: pointer; }
-  .link.dim { opacity: 0.08; }
+  .link.dim { opacity: 0.06; }
   .link.selected, .link:hover { stroke: var(--edge-hi); stroke-width: 2.2; }
   .link-label {
     fill: var(--muted); font-size: 9.5px; pointer-events: none;
     paint-order: stroke; stroke: var(--bg); stroke-width: 3px;
   }
-  .link-label.dim { opacity: 0.08; }
-  label.chk { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; user-select: none; }
+  .link-label.dim { opacity: 0.06; }
+  label.chk { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; user-select: none; white-space: nowrap; }
+  #help {
+    display: none; padding: 8px 14px; background: var(--panel);
+    border-bottom: 1px solid var(--border); color: var(--muted); font-size: 12px;
+  }
+  #help.open { display: block; }
+  #help code { color: var(--accent); background: var(--bg); padding: 1px 5px; border-radius: 4px; }
 </style>
 </head>
 <body>
 <header>
   <h1><span>OllMem</span> memory graph</h1>
-  <input id="owner" placeholder="owner (empty = everyone)" spellcheck="false">
-  <select id="scope">
-    <option value="">any scope</option>
-    <option value="user">user</option>
-    <option value="agent">agent</option>
-    <option value="session">session</option>
-  </select>
-  <input id="scopeId" placeholder="scope id" spellcheck="false">
-  <button id="load" class="primary">Load</button>
-  <input id="search" placeholder="filter entities…" spellcheck="false">
+
+  <span class="group">
+    <span class="lbl">recall from</span>
+    <input id="owner" placeholder="owner" spellcheck="false">
+    <select id="scope">
+      <option value="user">user</option>
+      <option value="agent">agent</option>
+      <option value="session">session</option>
+    </select>
+    <input id="scopeId" placeholder="scope id" spellcheck="false">
+    <button id="clearView" class="ghost" title="Clear the viewpoint">clear</button>
+  </span>
+
+  <input id="search" placeholder="search — try  owner:alice  predicate:prefers  -session" spellcheck="false">
+  <button id="helpBtn" class="ghost" title="Search syntax">?</button>
+  <label class="chk"><input type="checkbox" id="hide"> hide non-matching</label>
+  <label class="chk"><input type="checkbox" id="onlyReach"> only reachable</label>
   <label class="chk"><input type="checkbox" id="labels" checked> edge labels</label>
   <label class="chk"><input type="checkbox" id="auto"> auto-refresh</label>
+  <button id="load" class="primary">Reload</button>
   <span id="status"></span>
 </header>
-<div id="nsbar"><span class="hint">namespaces</span></div>
+
+<div id="help">
+  Terms are ANDed and match anywhere by default. Prefix with <code>-</code> to exclude, quote for phrases
+  (<code>"dark mode"</code>), or target a field:
+  <code>owner:</code> <code>scope:</code> <code>scopeId:</code> <code>ns:</code>
+  <code>subject:</code> <code>predicate:</code> <code>object:</code> <code>text:</code>.
+  An empty search shows everything. Non-matches are dimmed, not removed, unless <b>hide non-matching</b> is on.
+</div>
+
+<div id="idbar" class="bar"><span class="hint">linked identities</span></div>
+<div id="nsbar" class="bar"><span class="hint">namespaces</span></div>
+
 <main>
   <div id="canvas-wrap">
     <svg id="svg">
@@ -131,11 +177,13 @@
     </svg>
     <div id="empty">
       <b>No memories to show</b>
-      <div>Press Load to fetch every memory across all owners and scopes, or narrow it down with the fields above. Facts stored via /v1/remember or /v1/extract appear here as an entity–relationship graph.</div>
+      <div>Facts stored via <code>/v1/remember</code> or <code>/v1/extract</code> appear here as an
+      entity–relationship graph. Owners linked with <code>ollmem_link_owners</code> show up as one identity.</div>
     </div>
   </div>
   <aside id="panel"></aside>
 </main>
+
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
@@ -145,45 +193,59 @@ const gLinks = $("links"), gLabels = $("linkLabels"), gNodes = $("nodes");
 // Distinguishable on the dark canvas; one colour per namespace.
 const PALETTE = ["#58a6ff", "#3fb950", "#d29922", "#f778ba", "#a371f7",
                  "#39c5cf", "#f0883e", "#8ddb8c", "#ff7b72", "#79c0ff"];
+// Separate ramp for linked-identity groups so they never read as a namespace.
+const ID_PALETTE = ["#f0b429", "#7ee787", "#ff9bce", "#c8a2ff", "#6fd7e0"];
 
-let nodes = [], links = [], namespaces = [], selected = null;
+let nodes = [], links = [], namespaces = [], ownerLinks = [], identities = [];
+let nsByKey = new Map(), idByOwner = new Map(), selected = null;
 let nsColor = new Map();
+let viewpointActive = false;
 const hiddenNs = new Set();
 let view = { x: 0, y: 0, k: 1 };
 let heat = 0, rafId = null, autoTimer = null;
 
-// ---- URL / localStorage bootstrapping -------------------------------------
+// ---- URL bootstrapping -----------------------------------------------------
 const params = new URLSearchParams(location.search);
 $("owner").value = params.get("owner") || "";
-$("scope").value = params.get("scope") || "";
+$("scope").value = params.get("scope") || "user";
 $("scopeId").value = params.get("scopeId") || "";
+$("search").value = params.get("q") || "";
 
 function setStatus(msg, isError) {
   const el = $("status");
   el.textContent = msg;
   el.className = isError ? "error" : "";
 }
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
-// ---- Data loading ---------------------------------------------------------
-// The API is always asked for everything; owner / scope / scope id narrow the
-// result client-side. That way a partial filter (owner only) never guesses a
-// scope id, and a stale bookmark can fall back to the full graph.
+// ---- Data loading ----------------------------------------------------------
+// The dump is always the full graph; the owner/scope/scopeId fields are a
+// *viewpoint*, not a filter — the server scores each namespace by what a recall
+// from there would reach, and the default (empty) view shows everything.
 async function load() {
   const owner = $("owner").value.trim();
   const scope = $("scope").value;
   const scopeId = $("scopeId").value.trim();
+  const q = $("search").value.trim();
 
-  const query = new URLSearchParams();
-  if (owner) query.set("owner", owner);
-  if (scope) query.set("scope", scope);
-  if (scopeId) query.set("scopeId", scopeId);
-  history.replaceState(null, "", query.size ? `?${query}` : location.pathname);
+  const url = new URLSearchParams();
+  if (owner) {
+    url.set("fromOwner", owner);
+    url.set("fromScope", scope);
+    if (scopeId) url.set("fromScopeId", scopeId);
+  }
+
+  const bookmark = new URLSearchParams();
+  if (owner) { bookmark.set("owner", owner); bookmark.set("scope", scope); }
+  if (owner && scopeId) bookmark.set("scopeId", scopeId);
+  if (q) bookmark.set("q", q);
+  history.replaceState(null, "", bookmark.size ? `?${bookmark}` : location.pathname);
 
   setStatus("loading…");
   let res;
   try {
-    res = await fetch("/v1/graph");
-  } catch (e) {
+    res = await fetch(`/v1/graph${url.size ? `?${url}` : ""}`);
+  } catch {
     setStatus("cannot reach the OllMem API — is it running?", true);
     return;
   }
@@ -196,50 +258,34 @@ async function load() {
     setStatus(body.error || `request failed (${res.status})`, true);
     return;
   }
-  const all = await res.json();
 
-  const matches = ns =>
-    (!owner || ns.owner.toLowerCase() === owner.toLowerCase()) &&
-    (!scope || ns.scope === scope) &&
-    (!scopeId || ns.scopeId.toLowerCase() === scopeId.toLowerCase());
-
-  let data = narrow(all, matches);
-  let notice = "";
-  if ((owner || scope || scopeId) && !data.namespaces.length && all.namespaces.length) {
-    data = all;
-    notice = " · nothing matches the owner/scope filters — showing everything";
-  }
-
-  applyData(data);
-  setStatus(`${data.nodes.length} entities · ${data.edges.length} memories · ${data.namespaces.length} namespace${data.namespaces.length === 1 ? "" : "s"}${notice}`, !!notice);
-}
-
-function narrow(all, matches) {
-  const keep = new Set(all.namespaces.filter(matches).map(n => n.key));
-  return {
-    namespaces: all.namespaces.filter(n => keep.has(n.key)),
-    nodes: all.nodes.filter(n => keep.has(n.ns)),
-    edges: all.edges.filter(e => keep.has(e.ns)),
-  };
+  viewpointActive = !!owner;
+  applyData(await res.json());
 }
 
 function applyData(data) {
-  namespaces = data.namespaces;
+  namespaces = data.namespaces || [];
+  ownerLinks = data.ownerLinks || [];
+  nsByKey = new Map(namespaces.map(n => [n.key, n]));
   nsColor = new Map(namespaces.map((n, i) => [n.key, PALETTE[i % PALETTE.length]]));
   for (const key of [...hiddenNs]) {
-    if (!namespaces.some(n => n.key === key)) hiddenNs.delete(key);
+    if (!nsByKey.has(key)) hiddenNs.delete(key);
   }
+  identities = computeIdentities();
 
   // Preserve positions of nodes that survive a refresh so the layout is stable.
   const prev = new Map(nodes.map(n => [n.key, n]));
-  const w = svg.clientWidth, h = svg.clientHeight;
+  // The first dump can land before the SVG has been laid out; a zero size would
+  // collapse the whole seed ring onto one point, which the force sim can't undo.
+  const w = svg.clientWidth || 900, h = svg.clientHeight || 600;
 
-  nodes = data.nodes.map((n, i) => {
+  nodes = (data.nodes || []).map((n, i) => {
     const key = `${n.ns}|${n.id.toLowerCase()}`;
     const old = prev.get(key);
     const angle = (i / Math.max(1, data.nodes.length)) * 2 * Math.PI;
     return {
       key, id: n.id, ns: n.ns, degree: n.degree,
+      hay: nodeHaystack(n),
       x: old ? old.x : w / 2 + Math.cos(angle) * Math.min(w, h) * 0.3,
       y: old ? old.y : h / 2 + Math.sin(angle) * Math.min(w, h) * 0.3,
       vx: 0, vy: 0, fixed: old ? old.fixed : false
@@ -249,57 +295,286 @@ function applyData(data) {
 
   // Parallel edges between the same pair get increasing curvature offsets.
   const pairCount = new Map();
-  links = data.edges.map(e => {
+  links = (data.edges || []).map(e => {
     const a = byKey.get(`${e.ns}|${e.subject.toLowerCase()}`);
     const b = byKey.get(`${e.ns}|${e.object.toLowerCase()}`);
     const pair = [a.key, b.key].sort().join("§");
     const idx = pairCount.get(pair) || 0;
     pairCount.set(pair, idx + 1);
-    return { source: a, target: b, mem: e, lane: idx };
+    return { source: a, target: b, mem: e, lane: idx, hay: edgeHaystack(e) };
   });
 
   $("empty").style.display = nodes.length ? "none" : "flex";
   selected = null;
+  renderIdBar();
   renderNsBar();
   render();
   reheat();
+  report();
+}
+
+// ---- Linked identities -----------------------------------------------------
+// Owner links are symmetric and transitive, so each connected component of the
+// link graph is one real-world identity spread across several signing keys.
+function computeIdentities() {
+  const parent = new Map();
+  const find = x => {
+    if (!parent.has(x)) parent.set(x, x);
+    while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); }
+    return x;
+  };
+  const union = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent.set(ra, rb); };
+
+  for (const ns of namespaces) find(ns.owner.toLowerCase());
+  for (const l of ownerLinks) union(l.ownerA.toLowerCase(), l.ownerB.toLowerCase());
+
+  const groups = new Map();
+  for (const owner of parent.keys()) {
+    const root = find(owner);
+    if (!groups.has(root)) groups.set(root, []);
+    groups.get(root).push(owner);
+  }
+
+  // Only multi-owner components are an "identity" worth surfacing.
+  const result = [...groups.values()]
+    .filter(owners => owners.length > 1)
+    .map(owners => owners.sort())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map((owners, i) => ({
+      owners,
+      label: String.fromCharCode(65 + (i % 26)),
+      color: ID_PALETTE[i % ID_PALETTE.length],
+    }));
+
+  idByOwner = new Map();
+  for (const g of result) {
+    for (const o of g.owners) idByOwner.set(o, g);
+  }
+  return result;
+}
+
+function identityOf(nsKey) {
+  const ns = nsByKey.get(nsKey);
+  return ns ? idByOwner.get(ns.owner.toLowerCase()) : undefined;
+}
+
+function renderIdBar() {
+  const bar = $("idbar");
+  bar.className = identities.length ? "bar open" : "bar";
+  bar.innerHTML = '<span class="hint">linked identities</span>';
+  for (const g of identities) {
+    const chip = document.createElement("span");
+    chip.className = "chip idchip";
+    chip.title = `${g.owners.join(" ⇄ ")} — the same caller. Click to show/hide every namespace of this identity.`;
+    const owners = g.owners.map(esc).join('<span class="arrow"> ⇄ </span>');
+    chip.innerHTML = `<span class="badge" style="background:${g.color}">${g.label}</span>` +
+      `<span class="owners">${owners}</span>`;
+    chip.addEventListener("click", () => {
+      const keys = namespaces.filter(n => g.owners.includes(n.owner.toLowerCase())).map(n => n.key);
+      const anyVisible = keys.some(k => !hiddenNs.has(k));
+      for (const k of keys) { if (anyVisible) hiddenNs.add(k); else hiddenNs.delete(k); }
+      renderNsBar();
+      refresh();
+      reheat();
+      report();
+    });
+    bar.appendChild(chip);
+  }
+
+  // Owners that are linked but have no memories yet (e.g. a machine that has
+  // synced the link but not written anything) would otherwise be invisible.
+  const known = new Set(namespaces.map(n => n.owner.toLowerCase()));
+  const empty = identities.flatMap(g => g.owners).filter(o => !known.has(o));
+  if (empty.length) {
+    const note = document.createElement("span");
+    note.className = "hint";
+    note.style.textTransform = "none";
+    note.textContent = `· ${empty.join(", ")} linked but holds no memories yet`;
+    bar.appendChild(note);
+  }
 }
 
 // ---- Namespace filter bar --------------------------------------------------
 function renderNsBar() {
   const bar = $("nsbar");
-  bar.className = namespaces.length ? "open" : "";
+  bar.className = namespaces.length ? "bar open" : "bar";
   bar.innerHTML = '<span class="hint">namespaces</span>';
   for (const ns of namespaces) {
+    const g = idByOwner.get(ns.owner.toLowerCase());
     const chip = document.createElement("span");
     chip.className = "chip" + (hiddenNs.has(ns.key) ? " off" : "");
-    chip.title = `${ns.owner} / ${ns.scope} / ${ns.scopeId} — click to show/hide`;
-    chip.innerHTML = `<span class="dot" style="background:${nsColor.get(ns.key)}"></span>` +
-      `${esc(ns.key)} <span class="count">${ns.memoryCount}</span>`;
+    chip.title = `${ns.owner} / ${ns.scope} / ${ns.scopeId} — click to show/hide` +
+      (g ? `\nidentity ${g.label}: ${g.owners.join(" ⇄ ")}` : "") +
+      (viewpointActive ? `\n${ns.affinity == null ? "recall from the viewpoint cannot reach this" : `recall weight ×${ns.affinity}`}` : "");
+
+    const badge = g ? `<span class="badge" style="background:${g.color}">${g.label}</span>` : "";
+    const aff = viewpointActive
+      ? (ns.affinity == null
+          ? '<span class="aff none">unreachable</span>'
+          : `<span class="aff">×${ns.affinity}</span>`)
+      : "";
+    chip.innerHTML = `<span class="dot" style="background:${nsColor.get(ns.key)}"></span>${badge}` +
+      `${esc(ns.key)} <span class="count">${ns.memoryCount}</span> ${aff}`;
     chip.addEventListener("click", () => {
       if (hiddenNs.has(ns.key)) hiddenNs.delete(ns.key); else hiddenNs.add(ns.key);
       chip.classList.toggle("off");
-      applyVisibility();
+      refresh();
       reheat();
+      report();
     });
     bar.appendChild(chip);
   }
 }
 
-function visible(n) { return !hiddenNs.has(n.ns); }
+function reachable(nsKey) {
+  if (!viewpointActive) return true;
+  const ns = nsByKey.get(nsKey);
+  return !!ns && ns.affinity != null;
+}
 
+function visible(n) {
+  if (hiddenNs.has(n.ns)) return false;
+  if ($("onlyReach").checked && !reachable(n.ns)) return false;
+  return true;
+}
+
+// Drops a selection that just became invisible; applyFilter owns display, so
+// the two are always run as a pair via refresh().
 function applyVisibility() {
-  for (const n of nodes) n.g.style.display = visible(n) ? "" : "none";
-  for (const l of links) {
-    const on = visible(l.source) && visible(l.target);
-    l.path.style.display = on ? "" : "none";
-    l.label.style.display = on && $("labels").checked ? "" : "none";
-  }
   if (selected?.type === "node" && !visible(selected.node)) select(null);
   else if (selected?.type === "edge" && !visible(selected.link.source)) select(null);
 }
 
-// ---- Rendering ------------------------------------------------------------
+function refresh() { applyVisibility(); applyFilter(); }
+
+// ---- Search ----------------------------------------------------------------
+const FIELDS = {
+  owner: "owner", scope: "scope", scopeid: "scopeid", ns: "ns", namespace: "ns",
+  subject: "subject", subj: "subject", s: "subject",
+  predicate: "predicate", pred: "predicate", p: "predicate",
+  object: "object", obj: "object", o: "object",
+  text: "text", stmt: "text", statement: "text",
+};
+
+function nodeHaystack(n) {
+  const ns = nsByKey.get(n.ns);
+  const hay = {
+    ns: n.ns.toLowerCase(),
+    owner: (ns?.owner || "").toLowerCase(),
+    scope: (ns?.scope || "").toLowerCase(),
+    scopeid: (ns?.scopeId || "").toLowerCase(),
+    subject: n.id.toLowerCase(),
+    object: n.id.toLowerCase(),
+  };
+  hay.all = `${hay.subject} ${hay.ns}`;
+  return hay;
+}
+
+function edgeHaystack(e) {
+  const ns = nsByKey.get(e.ns);
+  const hay = {
+    ns: e.ns.toLowerCase(),
+    owner: (ns?.owner || "").toLowerCase(),
+    scope: (ns?.scope || "").toLowerCase(),
+    scopeid: (ns?.scopeId || "").toLowerCase(),
+    subject: e.subject.toLowerCase(),
+    predicate: e.predicate.toLowerCase(),
+    object: e.object.toLowerCase(),
+    text: e.statement.toLowerCase(),
+  };
+  hay.all = `${hay.subject} ${hay.predicate} ${hay.object} ${hay.text} ${hay.ns}`;
+  return hay;
+}
+
+function parseQuery(q) {
+  const terms = [];
+  const re = /(-?)(?:([A-Za-z]+):)?(?:"([^"]*)"|(\S+))/g;
+  let m;
+  while ((m = re.exec(q)) !== null) {
+    const [, neg, rawField, quoted, bare] = m;
+    const value = (quoted ?? bare ?? "").toLowerCase();
+    if (!value) continue;
+    // An unknown prefix isn't a field — treat the whole token as free text.
+    const field = rawField ? FIELDS[rawField.toLowerCase()] : null;
+    const text = rawField && !field ? `${rawField}:${value}`.toLowerCase() : value;
+    terms.push({ neg: neg === "-", field: field || null, value: text });
+  }
+  return terms;
+}
+
+function matches(hay, terms) {
+  for (const t of terms) {
+    const target = t.field ? hay[t.field] : hay.all;
+    // A field the entity doesn't carry (e.g. predicate on a node) never matches.
+    const hit = target != null && target.includes(t.value);
+    if (hit === t.neg) return false;
+  }
+  return true;
+}
+
+let lastMatch = { nodes: 0, links: 0 };
+
+function applyFilter() {
+  const terms = parseQuery($("search").value.trim());
+  const hide = $("hide").checked;
+
+  const linkHit = new Map();
+  const nodeHit = new Set();
+  for (const l of links) {
+    const on = !terms.length || matches(l.hay, terms);
+    linkHit.set(l, on);
+    if (on && terms.length) { nodeHit.add(l.source); nodeHit.add(l.target); }
+  }
+  for (const n of nodes) {
+    if (!terms.length || nodeHit.has(n) || matches(n.hay, terms)) nodeHit.add(n);
+  }
+
+  lastMatch = {
+    nodes: terms.length ? [...nodeHit].filter(visible).length : nodes.filter(visible).length,
+    links: terms.length ? links.filter(l => linkHit.get(l) && visible(l.source)).length
+                        : links.filter(l => visible(l.source) && visible(l.target)).length,
+  };
+
+  // Visibility always applies; the dim classes are skipped while a selected
+  // node owns the highlight (highlightNeighborhood set them).
+  const selectionOwnsDim = selected?.type === "node";
+  const filtering = terms.length > 0;
+
+  for (const n of nodes) {
+    const on = !filtering || nodeHit.has(n);
+    if (!selectionOwnsDim) n.g.classList.toggle("dim", !on);
+    n.g.style.display = visible(n) && (!hide || on) ? "" : "none";
+  }
+  for (const l of links) {
+    const on = !filtering || linkHit.get(l);
+    if (!selectionOwnsDim) {
+      l.path.classList.toggle("dim", !on);
+      l.label.classList.toggle("dim", !on);
+    }
+    const shown = visible(l.source) && visible(l.target) && (!hide || on);
+    l.path.style.display = shown ? "" : "none";
+    l.label.style.display = shown && $("labels").checked ? "" : "none";
+  }
+}
+
+function report() {
+  const nsCount = namespaces.length;
+  const terms = parseQuery($("search").value.trim());
+  const bits = [
+    `${lastMatch.nodes} entities`,
+    `${lastMatch.links} memories`,
+    `${nsCount} namespace${nsCount === 1 ? "" : "s"}`,
+  ];
+  if (identities.length) bits.push(`${identities.length} linked identit${identities.length === 1 ? "y" : "ies"}`);
+  if (terms.length) bits.push("filtered");
+  if (viewpointActive) {
+    const reach = namespaces.filter(n => n.affinity != null).length;
+    bits.push(`${reach}/${nsCount} reachable from viewpoint`);
+  }
+  setStatus(bits.join(" · "));
+}
+
+// ---- Rendering -------------------------------------------------------------
 const NS = "http://www.w3.org/2000/svg";
 function el(tag, attrs) {
   const e = document.createElementNS(NS, tag);
@@ -324,6 +599,10 @@ function render() {
     n.g = el("g", { class: "node" });
     const c = el("circle", { r: radius(n) });
     c.style.fill = nsColor.get(n.ns) || "#58a6ff";
+    // A ring in the identity colour marks entities whose owner is one of a
+    // linked set of identities — the same person seen from another machine.
+    const ident = identityOf(n.ns);
+    if (ident) { c.style.stroke = ident.color; c.style.strokeWidth = "2.5"; }
     const t = el("text", { x: radius(n) + 4, y: 4 });
     t.textContent = n.id.length > 28 ? n.id.slice(0, 27) + "…" : n.id;
     n.g.append(c, t);
@@ -331,8 +610,7 @@ function render() {
     n.g.addEventListener("pointerdown", ev => startDrag(n, ev));
     gNodes.appendChild(n.g);
   }
-  applyVisibility();
-  applyFilter();
+  refresh();
   position();
 }
 
@@ -347,13 +625,13 @@ function position() {
     l.path.setAttribute("d", `M${a.x},${a.y} Q${mx},${my} ${b.x},${b.y}`);
     l.label.setAttribute("x", (a.x + 2 * mx + b.x) / 4);
     l.label.setAttribute("y", (a.y + 2 * my + b.y) / 4 - 3);
-    if (visible(l.source) && visible(l.target))
+    if (l.path.style.display !== "none")
       l.label.style.display = showLabels ? "" : "none";
   }
   for (const n of nodes) n.g.setAttribute("transform", `translate(${n.x},${n.y})`);
 }
 
-// ---- Force simulation -----------------------------------------------------
+// ---- Force simulation ------------------------------------------------------
 function reheat() {
   heat = 1;
   if (!rafId) tick();
@@ -363,7 +641,7 @@ function tick() {
   rafId = null;
   if (heat < 0.005 || !nodes.length) { heat = 0; return; }
 
-  const w = svg.clientWidth, h = svg.clientHeight;
+  const w = svg.clientWidth || 900, h = svg.clientHeight || 600;
   const repulsion = 5200, springLen = 130, springK = 0.045, centerK = 0.012, damping = 0.82;
   const active = nodes.filter(visible);
 
@@ -372,8 +650,15 @@ function tick() {
     for (let j = i + 1; j < active.length; j++) {
       const b = active[j];
       let dx = b.x - a.x, dy = b.y - a.y;
-      let d2 = dx * dx + dy * dy || 1;
+      let d2 = dx * dx + dy * dy;
       if (d2 > 250000) continue;
+      if (d2 < 0.25) {
+        // Coincident nodes have no direction to push along (0/0); pick a
+        // deterministic one from the pair's indices so they still separate.
+        dx = (i - j) || 1;
+        dy = ((i + j) % 3) - 1 || 1;
+        d2 = dx * dx + dy * dy;
+      }
       const f = repulsion / d2, d = Math.sqrt(d2);
       dx /= d; dy /= d;
       a.vx -= dx * f; a.vy -= dy * f;
@@ -403,7 +688,7 @@ function tick() {
   rafId = requestAnimationFrame(tick);
 }
 
-// ---- Interaction: drag, pan, zoom -----------------------------------------
+// ---- Interaction: drag, pan, zoom ------------------------------------------
 function toWorld(ev) {
   const r = svg.getBoundingClientRect();
   return { x: (ev.clientX - r.left - view.x) / view.k, y: (ev.clientY - r.top - view.y) / view.k };
@@ -457,19 +742,28 @@ function applyView() {
 
 svg.addEventListener("click", () => select(null));
 
-// ---- Selection + details panel --------------------------------------------
+// ---- Selection + details panel ---------------------------------------------
 function fmtDate(s) { return new Date(s).toLocaleString(); }
 
-function memCard(m) {
-  const dot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${nsColor.get(m.ns)};margin-right:5px"></span>`;
-  return `<div class="mem">
+function nsLine(nsKey) {
+  const ns = nsByKey.get(nsKey);
+  const g = idByOwner.get((ns?.owner || "").toLowerCase());
+  const dot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${nsColor.get(nsKey)};margin-right:5px"></span>`;
+  const ident = g ? ` · <b style="color:${g.color}">identity ${g.label}</b> (${esc(g.owners.join(" ⇄ "))})` : "";
+  const aff = viewpointActive
+    ? (ns && ns.affinity != null ? ` · recall weight ×${ns.affinity}` : ' · <span style="color:var(--danger)">unreachable from viewpoint</span>')
+    : "";
+  return `${dot}${esc(nsKey)}${ident}${aff}`;
+}
+
+function memCard(m, hit) {
+  return `<div class="mem${hit ? " hit" : ""}">
     <div class="triple">${esc(m.subject)} —${esc(m.predicate)}→ ${esc(m.object)}</div>
     <div class="stmt">${esc(m.statement)}</div>
-    <div class="meta">${dot}${esc(m.ns)}</div>
+    <div class="meta">${nsLine(m.ns)}</div>
     <div class="meta">recalled ${m.accessCount}× · created ${fmtDate(m.createdAt)} · last used ${fmtDate(m.lastAccessedAt)}</div>
   </div>`;
 }
-function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
 function select(sel) {
   selected = sel;
@@ -477,23 +771,27 @@ function select(sel) {
   for (const n of nodes) n.g.classList.toggle("selected", sel?.type === "node" && sel.node === n);
   for (const l of links) l.path.classList.toggle("selected", sel?.type === "edge" && sel.link === l);
 
-  if (!sel) { panel.className = ""; panel.innerHTML = ""; applyFilter(); return; }
+  if (!sel) { panel.className = ""; panel.innerHTML = ""; applyFilter(); report(); return; }
   panel.className = "open";
+  const terms = parseQuery($("search").value.trim());
 
   if (sel.type === "node") {
     const n = sel.node;
     const related = links.filter(l => l.source === n || l.target === n);
+    const ident = identityOf(n.ns);
     panel.innerHTML = `<h2>${esc(n.id)}</h2>
-      <div class="sub">${esc(n.ns)} · ${related.length} relationship${related.length === 1 ? "" : "s"}</div>
-      ${related.map(l => memCard(l.mem)).join("")}`;
+      <div class="sub">${nsLine(n.ns)}<br>${related.length} relationship${related.length === 1 ? "" : "s"}</div>
+      ${ident ? `<div class="sub">Also stored under ${esc(ident.owners.filter(o => o !== (nsByKey.get(n.ns)?.owner || "").toLowerCase()).join(", "))} — recall from any of these owners reaches this memory.</div>` : ""}
+      ${related.map(l => memCard(l.mem, terms.length && matches(l.hay, terms))).join("")}`;
     highlightNeighborhood(n, related);
   } else {
     const m = sel.link.mem;
     panel.innerHTML = `<h2>Memory</h2>
       <div class="sub">${esc(m.memoryId)}</div>
-      ${memCard(m)}`;
+      ${memCard(m, terms.length && matches(sel.link.hay, terms))}`;
     applyFilter();
   }
+  report();
 }
 
 function highlightNeighborhood(center, related) {
@@ -507,31 +805,25 @@ function highlightNeighborhood(center, related) {
   }
 }
 
-// ---- Search filter ---------------------------------------------------------
-function applyFilter() {
-  const q = $("search").value.trim().toLowerCase();
-  if (selected?.type === "node") return; // neighborhood highlight wins
-  for (const n of nodes) n.g.classList.toggle("dim", !!q && !n.id.toLowerCase().includes(q));
-  for (const l of links) {
-    const on = !q
-      || l.source.id.toLowerCase().includes(q)
-      || l.target.id.toLowerCase().includes(q)
-      || l.mem.predicate.toLowerCase().includes(q);
-    l.path.classList.toggle("dim", !on);
-    l.label.classList.toggle("dim", !on);
-  }
-}
-
-// ---- Wiring ----------------------------------------------------------------
+// ---- Wiring -----------------------------------------------------------------
+const onSearch = () => { applyFilter(); report(); };
 $("load").addEventListener("click", load);
-$("search").addEventListener("input", applyFilter);
-$("labels").addEventListener("change", () => { applyVisibility(); position(); });
+$("search").addEventListener("input", onSearch);
+$("hide").addEventListener("change", onSearch);
+$("helpBtn").addEventListener("click", () => $("help").classList.toggle("open"));
+$("onlyReach").addEventListener("change", () => { refresh(); reheat(); report(); });
+$("labels").addEventListener("change", () => { applyFilter(); position(); });
 $("auto").addEventListener("change", ev => {
   clearInterval(autoTimer);
   if (ev.target.checked) autoTimer = setInterval(load, 5000);
 });
+$("clearView").addEventListener("click", () => {
+  $("owner").value = ""; $("scopeId").value = ""; $("scope").value = "user";
+  load();
+});
 for (const id of ["owner", "scopeId"])
   $(id).addEventListener("keydown", ev => { if (ev.key === "Enter") load(); });
+$("scope").addEventListener("change", () => { if ($("owner").value.trim()) load(); });
 window.addEventListener("resize", reheat);
 
 load();

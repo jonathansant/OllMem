@@ -59,4 +59,7 @@ public interface IMemoryEngine
 
     /// <summary>The full linked-owner set for <paramref name="owner"/>, including itself.</summary>
     ValueTask<IReadOnlySet<string>> GetLinkedOwnersAsync(string owner, CancellationToken ct = default);
+
+    /// <summary>Every declared owner link, once per pair. For visualisation/administration.</summary>
+    ValueTask<IReadOnlyList<OwnerLink>> GetAllOwnerLinksAsync(CancellationToken ct = default);
 }

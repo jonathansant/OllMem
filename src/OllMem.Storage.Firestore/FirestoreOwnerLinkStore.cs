@@ -1,5 +1,6 @@
 using Google.Cloud.Firestore;
 using OllMem.Core.Abstractions;
+using OllMem.Core.Domain;
 
 namespace OllMem.Storage.Firestore;
 
@@ -60,6 +61,15 @@ public sealed class FirestoreOwnerLinkStore : IOwnerLinkStore
         }
 
         return closure;
+    }
+
+    public async ValueTask<IReadOnlyList<OwnerLink>> GetAllLinksAsync(CancellationToken ct = default)
+    {
+        var snapshot = await _ctx.OwnerLinks.GetSnapshotAsync(ct);
+        return snapshot.Documents
+            .Select(d => OwnerLink.Create(d.GetValue<string>("ownerA"), d.GetValue<string>("ownerB")))
+            .Distinct()
+            .ToList();
     }
 
     private static (string A, string B) Normalize(string ownerA, string ownerB)

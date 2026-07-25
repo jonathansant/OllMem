@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using OllMem.Core.Abstractions;
+using OllMem.Core.Domain;
 
 namespace OllMem.Storage.Git;
 
@@ -75,12 +76,7 @@ public sealed class GitOwnerLinkStore : IOwnerLinkStore
         {
             // Small dataset (owner links, not memories) — a full scan per
             // recall is simpler and cheap enough than a graph index on disk.
-            var edges = Directory.Exists(_ctx.LinksDirectory)
-                ? Directory.EnumerateFiles(_ctx.LinksDirectory, "*.json")
-                    .Select(ReadLink)
-                    .OfType<LinkDocument>()
-                    .ToList()
-                : [];
+            var edges = ReadAllLinks();
 
             var frontier = new Queue<string>([start]);
             while (frontier.Count > 0)
@@ -103,6 +99,28 @@ public sealed class GitOwnerLinkStore : IOwnerLinkStore
 
         return closure;
     }
+
+    public async ValueTask<IReadOnlyList<OwnerLink>> GetAllLinksAsync(CancellationToken ct = default)
+    {
+        await _ctx.Gate.WaitAsync(ct);
+        try
+        {
+            return ReadAllLinks().Select(l => OwnerLink.Create(l.OwnerA, l.OwnerB)).Distinct().ToList();
+        }
+        finally
+        {
+            _ctx.Gate.Release();
+        }
+    }
+
+    // Callers must hold the gate.
+    private List<LinkDocument> ReadAllLinks() =>
+        Directory.Exists(_ctx.LinksDirectory)
+            ? Directory.EnumerateFiles(_ctx.LinksDirectory, "*.json")
+                .Select(ReadLink)
+                .OfType<LinkDocument>()
+                .ToList()
+            : [];
 
     private static (string A, string B) Normalize(string ownerA, string ownerB)
     {

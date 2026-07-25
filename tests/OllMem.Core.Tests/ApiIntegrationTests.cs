@@ -3,6 +3,8 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
+using OllMem.Core.Abstractions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
 namespace OllMem.Core.Tests;
@@ -10,9 +12,13 @@ namespace OllMem.Core.Tests;
 public class ApiIntegrationTests : IClassFixture<ApiIntegrationTests.OfflineFactory>
 {
     private readonly HttpClient _client;
+    private readonly OfflineFactory _factory;
 
-    public ApiIntegrationTests(OfflineFactory factory) =>
+    public ApiIntegrationTests(OfflineFactory factory)
+    {
+        _factory = factory;
         _client = factory.CreateClient();
+    }
 
     /// <summary>
     /// Pins the deterministic offline components so results don't depend on
@@ -178,6 +184,69 @@ public class ApiIntegrationTests : IClassFixture<ApiIntegrationTests.OfflineFact
         Assert.All(json.GetProperty("edges").EnumerateArray(),
             e => Assert.False(string.IsNullOrEmpty(e.GetProperty("ns").GetString())));
     }
+
+    [Fact]
+    public async Task Graph_reports_owner_links_and_reachability_from_a_viewpoint()
+    {
+        var laptop = $"laptop-{Guid.NewGuid():N}";
+        var desktop = $"desktop-{Guid.NewGuid():N}";
+        var stranger = $"stranger-{Guid.NewGuid():N}";
+
+        foreach (var (owner, scope, scopeId) in new[]
+                 { (laptop, "user", "u1"), (laptop, "agent", "a1"), (desktop, "user", "u1"), (stranger, "user", "u1") })
+        {
+            await _client.PostAsJsonAsync("/v1/remember", new
+            {
+                owner, scope, scopeId,
+                statement = "likes tea", subject = "user", predicate = "likes", @object = "tea"
+            });
+        }
+
+        // Linking is engine-side only — the HTTP API deliberately exposes no
+        // endpoint for it, so drive it through the host's own engine instance.
+        var engine = _factory.Services.GetRequiredService<IMemoryEngine>();
+        await engine.LinkOwnersAsync(laptop, desktop);
+
+        var res = await _client.GetAsync($"/v1/graph?fromOwner={laptop}&fromScope=user&fromScopeId=u1");
+        res.EnsureSuccessStatusCode();
+        var json = await res.Content.ReadFromJsonAsync<JsonElement>();
+
+        var pairs = json.GetProperty("ownerLinks").EnumerateArray()
+            .Select(l => (l.GetProperty("ownerA").GetString(), l.GetProperty("ownerB").GetString()))
+            .ToList();
+        Assert.Contains(pairs, p => p == OrderedPair(laptop, desktop));
+
+        var byKey = json.GetProperty("namespaces").EnumerateArray()
+            .ToDictionary(n => n.GetProperty("key").GetString()!, n => n.GetProperty("affinity"));
+
+        // The viewpoint itself, a sibling scope, a linked owner, and a stranger.
+        Assert.Equal(1.0, byKey[$"{laptop}/user/u1"].GetDouble());
+        Assert.Equal(0.75, byKey[$"{laptop}/agent/a1"].GetDouble());
+        Assert.Equal(0.9, byKey[$"{desktop}/user/u1"].GetDouble());
+        Assert.Equal(JsonValueKind.Null, byKey[$"{stranger}/user/u1"].ValueKind);
+    }
+
+    [Fact]
+    public async Task Graph_without_a_viewpoint_leaves_affinity_unset()
+    {
+        var owner = $"owner-{Guid.NewGuid():N}";
+        await _client.PostAsJsonAsync("/v1/remember", new
+        {
+            owner, scope = "user", scopeId = "u1",
+            statement = "likes tea", subject = "user", predicate = "likes", @object = "tea"
+        });
+
+        var res = await _client.GetAsync("/v1/graph");
+        res.EnsureSuccessStatusCode();
+        var json = await res.Content.ReadFromJsonAsync<JsonElement>();
+
+        // The default view is "everything, unscored" — the UI relies on this.
+        Assert.All(json.GetProperty("namespaces").EnumerateArray(),
+            n => Assert.Equal(JsonValueKind.Null, n.GetProperty("affinity").ValueKind));
+    }
+
+    private static (string, string) OrderedPair(string a, string b) =>
+        string.CompareOrdinal(a, b) <= 0 ? (a, b) : (b, a);
 
     [Fact]
     public async Task Graph_visualizer_page_is_served()
