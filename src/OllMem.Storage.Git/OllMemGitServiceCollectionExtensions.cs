@@ -46,6 +46,7 @@ public static class OllMemGitServiceCollectionExtensions
         services.TryAddSingleton<IGraphStore>(sp => sp.GetRequiredService<GitHybridStore>());
         services.TryAddSingleton<IBlobStore, GitBlobStore>();
         services.TryAddSingleton<IAuditLog, GitAuditLog>();
+        services.TryAddSingleton<IOwnerLinkStore, GitOwnerLinkStore>();
         return services;
     }
 }

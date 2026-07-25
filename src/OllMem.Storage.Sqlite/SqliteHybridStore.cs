@@ -52,6 +52,41 @@ public sealed class SqliteHybridStore : IVectorStore, IGraphStore
             .ToList();
     }
 
+    public async ValueTask<IReadOnlyList<(MemoryNode Node, double Similarity)>> SearchOwnersAsync(
+        IReadOnlySet<string> owners, float[] queryEmbedding, int topK, CancellationToken ct = default)
+    {
+        if (owners.Count == 0)
+            return [];
+
+        // Filter in SQL so rows belonging to other owners never get read back
+        // and their embeddings never get decoded. lower() keeps the match
+        // case-insensitive (the owner column preserves the caller's casing,
+        // unlike namespace_key) without needing a schema migration.
+        var normalized = owners.Select(o => o.Trim().ToLowerInvariant()).ToList();
+        await using var conn = _ctx.OpenConnection();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            $"SELECT {Columns} FROM memories " +
+            $"WHERE status = 0 AND lower(owner) IN ({string.Join(", ", normalized.Select((_, i) => $"$o{i}"))})";
+        for (var i = 0; i < normalized.Count; i++)
+            cmd.Parameters.AddWithValue($"$o{i}", normalized[i]);
+
+        var results = new List<(MemoryNode Node, double Similarity)>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var node = Map(reader);
+            if (node.Embedding.Length != queryEmbedding.Length)
+                continue;
+            results.Add((node, HashingEmbeddingService.CosineSimilarity(queryEmbedding, node.Embedding)));
+        }
+
+        return results
+            .OrderByDescending(x => x.Similarity)
+            .Take(Math.Max(0, topK))
+            .ToList();
+    }
+
     public async ValueTask<IReadOnlyList<MemoryNode>> ListActiveAsync(
         Namespace ns, CancellationToken ct = default)
     {

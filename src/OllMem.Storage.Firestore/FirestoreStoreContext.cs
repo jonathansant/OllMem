@@ -18,6 +18,7 @@ public sealed class FirestoreStoreContext
     public string BlobsCollection { get; }
     public string AuditCollection { get; }
     public string MetaCollection { get; }
+    public string OwnerLinksCollection { get; }
 
     public FirestoreStoreContext(FirestoreStoreOptions options)
     {
@@ -30,6 +31,7 @@ public sealed class FirestoreStoreContext
         BlobsCollection = $"{prefix}_blobs";
         AuditCollection = $"{prefix}_audit";
         MetaCollection = $"{prefix}_meta";
+        OwnerLinksCollection = $"{prefix}_owner_links";
 
         var builder = new FirestoreDbBuilder
         {
@@ -47,4 +49,5 @@ public sealed class FirestoreStoreContext
     public CollectionReference Blobs => Db.Collection(BlobsCollection);
     public CollectionReference Audit => Db.Collection(AuditCollection);
     public DocumentReference AuditTip => Db.Collection(MetaCollection).Document("audit_tip");
+    public CollectionReference OwnerLinks => Db.Collection(OwnerLinksCollection);
 }

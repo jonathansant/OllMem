@@ -24,7 +24,7 @@ public sealed class TestClock(DateTimeOffset start) : TimeProvider
 public static class EngineFactory
 {
     public static (OllMemMemoryEngine Engine, TestClock Clock, IAuditLog Audit) Create(
-        SoftDecayOptions? decay = null)
+        SoftDecayOptions? decay = null, IOwnerLinkStore? ownerLinks = null)
     {
         var clock = new TestClock(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
         var audit = new HashChainedAuditLog();
@@ -37,7 +37,8 @@ public static class EngineFactory
             new SoftDecayScorer(decay),
             new RuleBasedFactExtractor(),
             audit,
-            clock);
+            clock,
+            ownerLinks);
 
         return (engine, clock, audit);
     }

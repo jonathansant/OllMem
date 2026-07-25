@@ -54,6 +54,26 @@ public sealed class InMemoryVectorStore : IVectorStore
         return ValueTask.FromResult<IReadOnlyList<(MemoryNode, double)>>(top);
     }
 
+    public ValueTask<IReadOnlyList<(MemoryNode Node, double Similarity)>> SearchOwnersAsync(
+        IReadOnlySet<string> owners,
+        float[] queryEmbedding,
+        int topK,
+        CancellationToken ct = default)
+    {
+        // Don't rely on the caller's set using a case-insensitive comparer.
+        var match = new HashSet<string>(owners, StringComparer.OrdinalIgnoreCase);
+        var top = _nodes.Values
+            .Where(n => n.Status == MemoryStatus.Active
+                && match.Contains(n.Namespace.Owner)
+                && n.Embedding.Length == queryEmbedding.Length)
+            .Select(n => (Node: n, Similarity: HashingEmbeddingService.CosineSimilarity(queryEmbedding, n.Embedding)))
+            .OrderByDescending(r => r.Similarity)
+            .Take(Math.Max(0, topK))
+            .ToList();
+
+        return ValueTask.FromResult<IReadOnlyList<(MemoryNode, double)>>(top);
+    }
+
     public ValueTask<IReadOnlyList<MemoryNode>> ListActiveAsync(Namespace ns, CancellationToken ct = default) =>
         ValueTask.FromResult<IReadOnlyList<MemoryNode>>(EnumerateActive(ns).ToList());
 

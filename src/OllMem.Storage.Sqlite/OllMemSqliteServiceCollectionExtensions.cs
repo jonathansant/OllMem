@@ -25,6 +25,7 @@ public static class OllMemSqliteServiceCollectionExtensions
         services.TryAddSingleton<IGraphStore>(sp => sp.GetRequiredService<SqliteHybridStore>());
         services.TryAddSingleton<IBlobStore, SqliteBlobStore>();
         services.TryAddSingleton<IAuditLog, SqliteAuditLog>();
+        services.TryAddSingleton<IOwnerLinkStore, SqliteOwnerLinkStore>();
         return services;
     }
 }

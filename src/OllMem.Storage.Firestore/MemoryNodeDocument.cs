@@ -32,7 +32,11 @@ internal sealed class MemoryNodeDocument
     public static MemoryNodeDocument From(MemoryNode node) => new()
     {
         NamespaceKey = node.Namespace.Key,
-        Owner = node.Namespace.Owner,
+        // Normalised like namespaceKey/subject/predicate so owner-equality
+        // queries (FirestoreHybridStore.SearchOwnersAsync) can match without a
+        // server-side lower(); Namespace.Key is case-insensitive anyway, so
+        // nothing depends on the caller's original casing being preserved.
+        Owner = node.Namespace.Owner.ToLowerInvariant(),
         Scope = (int)node.Namespace.Scope,
         ScopeId = node.Namespace.ScopeId,
         Statement = node.Statement,

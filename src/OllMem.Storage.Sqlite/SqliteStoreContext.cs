@@ -91,6 +91,12 @@ public sealed class SqliteStoreContext
                 hash          TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS ix_audit_ns ON audit (namespace_key);
+
+            CREATE TABLE IF NOT EXISTS owner_links (
+                owner_a TEXT NOT NULL,
+                owner_b TEXT NOT NULL,
+                PRIMARY KEY (owner_a, owner_b)
+            );
             """;
         cmd.ExecuteNonQuery();
     }

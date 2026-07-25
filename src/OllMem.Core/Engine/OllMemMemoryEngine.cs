@@ -23,6 +23,7 @@ public sealed class OllMemMemoryEngine : IMemoryEngine
     private readonly IDecayScorer _decay;
     private readonly IFactExtractor _extractor;
     private readonly IAuditLog _audit;
+    private readonly IOwnerLinkStore _ownerLinks;
     private readonly TimeProvider _clock;
 
     public OllMemMemoryEngine(
@@ -34,7 +35,8 @@ public sealed class OllMemMemoryEngine : IMemoryEngine
         IDecayScorer decay,
         IFactExtractor extractor,
         IAuditLog audit,
-        TimeProvider? clock = null)
+        TimeProvider? clock = null,
+        IOwnerLinkStore? ownerLinks = null)
     {
         _embeddings = embeddings;
         _vectors = vectors;
@@ -45,6 +47,7 @@ public sealed class OllMemMemoryEngine : IMemoryEngine
         _extractor = extractor;
         _audit = audit;
         _clock = clock ?? TimeProvider.System;
+        _ownerLinks = ownerLinks ?? new Storage.InMemoryOwnerLinkStore();
     }
 
     public async ValueTask<RememberResult> RememberAsync(
@@ -148,6 +151,10 @@ public sealed class OllMemMemoryEngine : IMemoryEngine
         return new RememberResult(node, supersededId);
     }
 
+    // Minimum raw similarity for a memory from outside the caller's own
+    // namespace to be considered at all.
+    private const double MinBroadenedSimilarity = 0.15;
+
     public async ValueTask<IReadOnlyList<ScoredMemory>> RecallAsync(
         Namespace ns,
         string query,
@@ -158,17 +165,46 @@ public sealed class OllMemMemoryEngine : IMemoryEngine
             return [];
 
         var queryEmbedding = await _embeddings.EmbedAsync(query, ct);
-        var candidates = await _vectors.SearchAsync(ns, queryEmbedding, topK * CandidateMultiplier, ct);
+        var candidateCount = topK * CandidateMultiplier;
 
+        // The caller's own namespace is always fully considered, independently
+        // of how it competes with the broadened pool below.
+        var exact = await _vectors.SearchAsync(ns, queryEmbedding, candidateCount, ct);
+
+        // Broaden beyond the exact namespace: a fact stored under a sibling
+        // scopeId, a different scope tier, or an owner explicitly linked as
+        // the same identity (IOwnerLinkStore — e.g. the same person's other
+        // machine) can still be the right answer. Owners are never broadened
+        // into implicitly: namespaces are cryptographically compartmentalized
+        // per owner (PRD REQ-1.3), so crossing that boundary requires an
+        // explicit link the caller created.
+        var linkedOwners = await _ownerLinks.GetLinkedOwnersAsync(ns.Owner, ct);
+        var broadened = await _vectors.SearchOwnersAsync(linkedOwners, queryEmbedding, candidateCount, ct);
+
+        var seen = new HashSet<Guid>(exact.Count + broadened.Count);
         var now = _clock.GetUtcNow();
-        var scored = new List<ScoredMemory>(candidates.Count);
-        foreach (var (node, similarity) in candidates)
+        var scored = new List<ScoredMemory>(exact.Count + broadened.Count);
+        foreach (var (node, similarity) in exact.Concat(broadened))
         {
+            // The broadened pool overlaps the exact one; keep the first (exact)
+            // reading of each node so a memory is never scored twice.
+            if (!seen.Add(node.Id))
+                continue;
+
+            var affinity = NamespaceAffinityScorer.Score(ns, node.Namespace, linkedOwners);
+
+            // Outside the caller's own namespace, a weak similarity is noise
+            // rather than a plausibly-related fact; don't let namespace breadth
+            // drag in irrelevant results.
+            if (affinity < NamespaceAffinityScorer.Exact && similarity < MinBroadenedSimilarity)
+                continue;
+
             var weight = _decay.Weight(node, now);
-            scored.Add(new ScoredMemory(node, similarity, weight, similarity * weight));
+            scored.Add(new ScoredMemory(node, similarity, weight, affinity, similarity * weight * affinity));
         }
 
-        // Time-aware reranking: similarity × recency/usage weight (PRD REQ-4.2).
+        // Time-aware, namespace-aware reranking: similarity × recency/usage
+        // weight × namespace affinity (PRD REQ-4.2).
         var ranked = scored
             .OrderByDescending(s => s.FinalScore)
             .ThenByDescending(s => s.Node.LastAccessedAt)
@@ -180,7 +216,7 @@ public sealed class OllMemMemoryEngine : IMemoryEngine
         {
             Touch(item.Node);
             await _vectors.UpsertAsync(item.Node, ct);
-            await _audit.AppendAsync(AuditAction.Access, ns, item.Node.Id, "recalled", ct);
+            await _audit.AppendAsync(AuditAction.Access, item.Node.Namespace, item.Node.Id, "recalled", ct);
         }
 
         return ranked;
@@ -192,6 +228,15 @@ public sealed class OllMemMemoryEngine : IMemoryEngine
         string? predicate = null,
         CancellationToken ct = default) =>
         _graph.NeighborsAsync(ns, subject, predicate, ct);
+
+    public ValueTask LinkOwnersAsync(string ownerA, string ownerB, CancellationToken ct = default) =>
+        _ownerLinks.LinkAsync(ownerA, ownerB, ct);
+
+    public ValueTask UnlinkOwnersAsync(string ownerA, string ownerB, CancellationToken ct = default) =>
+        _ownerLinks.UnlinkAsync(ownerA, ownerB, ct);
+
+    public ValueTask<IReadOnlySet<string>> GetLinkedOwnersAsync(string owner, CancellationToken ct = default) =>
+        _ownerLinks.GetLinkedOwnersAsync(owner, ct);
 
     private void Touch(MemoryNode node)
     {

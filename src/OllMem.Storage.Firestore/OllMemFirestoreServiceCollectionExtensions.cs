@@ -34,6 +34,7 @@ public static class OllMemFirestoreServiceCollectionExtensions
         services.TryAddSingleton<IGraphStore>(sp => sp.GetRequiredService<FirestoreHybridStore>());
         services.TryAddSingleton<IBlobStore, FirestoreBlobStore>();
         services.TryAddSingleton<IAuditLog, FirestoreAuditLog>();
+        services.TryAddSingleton<IOwnerLinkStore, FirestoreOwnerLinkStore>();
         return services;
     }
 }

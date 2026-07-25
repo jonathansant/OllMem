@@ -46,6 +46,52 @@ public sealed class FirestoreHybridStore : IVectorStore, IGraphStore
             .ToList();
     }
 
+    // Firestore caps the value list of an "in" filter; owner sets are tiny in
+    // practice (one identity's machines), so chunking is a safety net.
+    private const int InFilterChunkSize = 30;
+
+    public async ValueTask<IReadOnlyList<(MemoryNode Node, double Similarity)>> SearchOwnersAsync(
+        IReadOnlySet<string> owners, float[] queryEmbedding, int topK, CancellationToken ct = default)
+    {
+        if (owners.Count == 0)
+            return [];
+
+        // Owners are stored lower-cased (MemoryNodeDocument.From). Documents
+        // written before that normalisation kept the caller's casing, so query
+        // both spellings rather than silently missing pre-existing memories.
+        var candidates = owners
+            .SelectMany(o => new[] { o.Trim(), o.Trim().ToLowerInvariant() })
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        var results = new List<(MemoryNode Node, double Similarity)>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (var i = 0; i < candidates.Count; i += InFilterChunkSize)
+        {
+            var chunk = candidates.Skip(i).Take(InFilterChunkSize).ToList();
+            var snapshot = await _ctx.Memories
+                .WhereIn("owner", chunk)
+                .WhereEqualTo("status", (int)MemoryStatus.Active)
+                .GetSnapshotAsync(ct);
+
+            foreach (var doc in snapshot.Documents)
+            {
+                // Chunks may overlap on casing variants of the same owner.
+                if (!seen.Add(doc.Id))
+                    continue;
+                var node = ToNode(doc);
+                if (node.Embedding.Length != queryEmbedding.Length)
+                    continue;
+                results.Add((node, HashingEmbeddingService.CosineSimilarity(queryEmbedding, node.Embedding)));
+            }
+        }
+
+        return results
+            .OrderByDescending(x => x.Similarity)
+            .Take(Math.Max(0, topK))
+            .ToList();
+    }
+
     public async ValueTask<IReadOnlyList<MemoryNode>> ListActiveAsync(
         Namespace ns, CancellationToken ct = default)
     {

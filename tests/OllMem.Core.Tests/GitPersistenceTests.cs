@@ -59,7 +59,9 @@ public sealed class GitPersistenceTests : IAsyncLifetime
             _cipher,
             new SoftDecayScorer(),
             new RuleBasedFactExtractor(),
-            audit);
+            audit,
+            clock: null,
+            ownerLinks: new GitOwnerLinkStore(ctx));
         return (engine, audit, hybrid);
     }
 
@@ -232,6 +234,40 @@ public sealed class GitPersistenceTests : IAsyncLifetime
         Assert.NotNull(stored);
         Assert.NotEqual(plaintext, stored);                    // stored form is ciphertext
         Assert.Equal(plaintext, _cipher.Decrypt("owner/user/u1", stored!));
+    }
+
+    [Fact]
+    public async Task Owner_links_sync_across_machines()
+    {
+        var remote = CreateBareRemote();
+        var laptop = new Namespace("laptop-key", MemoryScope.User, "u1");
+        var desktop = new Namespace("desktop-key", MemoryScope.User, "u1");
+
+        // The laptop writes under its own signing key and links its two identities.
+        var machineA = NewContext("machine-a", remote);
+        var (engineA, _, _) = NewEngine(machineA);
+        await engineA.RememberAsync(laptop, "Deploys run through service.sh",
+            GraphEdge.Create("deploy", "runs through", "service.sh"));
+        await engineA.LinkOwnersAsync("laptop-key", "desktop-key");
+        Assert.True(await machineA.SyncAsync());
+
+        // The desktop clones the shared memory and recalls under its own owner,
+        // reaching the laptop's namespace purely because of the synced link.
+        var machineB = NewContext("machine-b", remote);
+        var (engineB, _, _) = NewEngine(machineB);
+        Assert.Equal(
+            new[] { "desktop-key", "laptop-key" },
+            (await engineB.GetLinkedOwnersAsync("desktop-key")).OrderBy(o => o));
+
+        var recalled = await engineB.RecallAsync(desktop, "how do deploys run", topK: 5);
+        Assert.Contains(recalled, r => r.Node.Statement.Contains("service.sh"));
+
+        // Unlinking on one machine propagates back and restores isolation.
+        await engineB.UnlinkOwnersAsync("desktop-key", "laptop-key");
+        Assert.True(await machineB.SyncAsync());
+        Assert.True(await machineA.SyncAsync());
+
+        Assert.Empty(await engineA.RecallAsync(desktop, "how do deploys run", topK: 5));
     }
 
     private static void RunGit(string workDir, params string[] args)

@@ -93,8 +93,10 @@ public static class OllMemMemoryTools
         return Serialize(results.Select(s => new
         {
             memory = ToMemory(s.Node),
+            @namespace = new { s.Node.Namespace.Owner, scope = s.Node.Namespace.Scope.ToString(), s.Node.Namespace.ScopeId },
             similarity = Math.Round(s.Similarity, 4),
             decayWeight = Math.Round(s.DecayWeight, 4),
+            namespaceAffinity = Math.Round(s.NamespaceAffinity, 4),
             finalScore = Math.Round(s.FinalScore, 4),
         }));
     }
@@ -114,6 +116,47 @@ public static class OllMemMemoryTools
         var ns = ResolveNamespace(owner, scope, scopeId);
         var edges = await engine.NeighborsAsync(ns, subject, predicate, ct);
         return Serialize(edges.Select(e => new { e.Subject, e.Predicate, e.Object }));
+    }
+
+    [McpServerTool(Name = "ollmem_link_owners")]
+    [Description("Declare two owner identities as the same real-world caller (e.g. the same person's " +
+                 "two machines, each with its own signing key). Linked owners keep separate, separately " +
+                 "encrypted namespaces — nothing is merged or moved — but ollmem_recall broadens across " +
+                 "them so the same person's memory is visible regardless of which machine wrote it. " +
+                 "Links are symmetric and transitive.")]
+    public static async Task<string> LinkOwnersAsync(
+        IMemoryEngine engine,
+        [Description("First owner identity.")] string owner,
+        [Description("Second owner identity to declare equivalent to the first.")] string otherOwner,
+        CancellationToken ct = default)
+    {
+        await engine.LinkOwnersAsync(owner, otherOwner, ct);
+        var linked = await engine.GetLinkedOwnersAsync(owner, ct);
+        return Serialize(new { linkedOwners = linked.OrderBy(o => o, StringComparer.OrdinalIgnoreCase) });
+    }
+
+    [McpServerTool(Name = "ollmem_unlink_owners")]
+    [Description("Remove a previously declared link between two owner identities.")]
+    public static async Task<string> UnlinkOwnersAsync(
+        IMemoryEngine engine,
+        [Description("First owner identity.")] string owner,
+        [Description("Second owner identity to unlink from the first.")] string otherOwner,
+        CancellationToken ct = default)
+    {
+        await engine.UnlinkOwnersAsync(owner, otherOwner, ct);
+        var linked = await engine.GetLinkedOwnersAsync(owner, ct);
+        return Serialize(new { linkedOwners = linked.OrderBy(o => o, StringComparer.OrdinalIgnoreCase) });
+    }
+
+    [McpServerTool(Name = "ollmem_linked_owners")]
+    [Description("List every owner identity currently linked (directly or transitively) to the given owner, including itself.")]
+    public static async Task<string> LinkedOwnersAsync(
+        IMemoryEngine engine,
+        [Description("Owner identity to inspect.")] string owner,
+        CancellationToken ct = default)
+    {
+        var linked = await engine.GetLinkedOwnersAsync(owner, ct);
+        return Serialize(new { linkedOwners = linked.OrderBy(o => o, StringComparer.OrdinalIgnoreCase) });
     }
 
     private static Namespace ResolveNamespace(string owner, string scope, string scopeId)

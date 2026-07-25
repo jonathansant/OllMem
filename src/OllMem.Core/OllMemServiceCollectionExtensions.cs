@@ -35,6 +35,7 @@ public static class OllMemServiceCollectionExtensions
         services.TryAddSingleton<IVectorStore, InMemoryVectorStore>();
         services.TryAddSingleton<IGraphStore, InMemoryGraphStore>();
         services.TryAddSingleton<IBlobStore, InMemoryBlobStore>();
+        services.TryAddSingleton<IOwnerLinkStore, InMemoryOwnerLinkStore>();
 
         // Security: Ed25519 signing, AES-GCM payload encryption, audit log.
         services.TryAddSingleton<ISignatureScheme, Ed25519SignatureScheme>();

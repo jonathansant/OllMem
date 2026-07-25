@@ -40,7 +40,8 @@ public sealed class SqlitePersistenceTests : IDisposable
             new SoftDecayScorer(),
             new RuleBasedFactExtractor(),
             audit,
-            clock);
+            clock,
+            new SqliteOwnerLinkStore(_ctx));
         return (engine, audit);
     }
 
@@ -121,6 +122,58 @@ public sealed class SqlitePersistenceTests : IDisposable
         Assert.NotNull(stored);
         Assert.NotEqual(plaintext, stored);                    // stored form is ciphertext
         Assert.Equal(plaintext, _cipher.Decrypt("owner/user/u1", stored!));
+    }
+
+    [Fact]
+    public async Task Recall_reaches_a_sibling_scope_of_the_same_owner()
+    {
+        var userNs = new Namespace("owner", MemoryScope.User, "u1");
+        var agentNs = new Namespace("owner", MemoryScope.Agent, "a1");
+
+        var (engine, _) = NewEngine(TimeProvider.System);
+        await engine.RememberAsync(agentNs, "Deploys run through service.sh",
+            GraphEdge.Create("deploy", "runs through", "service.sh"));
+
+        // Nothing was ever written to userNs, so this can only come from the
+        // agent-scope sibling — proving SearchOwnersAsync spans scopes.
+        var recalled = await engine.RecallAsync(userNs, "how do deploys run", topK: 5);
+        Assert.Contains(recalled, r => r.Node.Statement.Contains("service.sh"));
+        Assert.All(recalled, r => Assert.True(r.NamespaceAffinity < 1.0));
+    }
+
+    [Fact]
+    public async Task Owner_links_persist_across_a_restart()
+    {
+        var laptop = new Namespace("laptop-key", MemoryScope.User, "u1");
+        var desktop = new Namespace("desktop-key", MemoryScope.User, "u1");
+
+        // First "process": write on the laptop identity and link the two.
+        var (engine1, _) = NewEngine(TimeProvider.System);
+        await engine1.RememberAsync(laptop, "Deploys run through service.sh",
+            GraphEdge.Create("deploy", "runs through", "service.sh"));
+        await engine1.LinkOwnersAsync("laptop-key", "desktop-key");
+
+        // Second "process": brand-new engine, same database file.
+        var (engine2, _) = NewEngine(TimeProvider.System);
+        Assert.Equal(
+            new[] { "desktop-key", "laptop-key" },
+            (await engine2.GetLinkedOwnersAsync("desktop-key")).OrderBy(o => o));
+
+        var recalled = await engine2.RecallAsync(desktop, "how do deploys run", topK: 5);
+        Assert.Contains(recalled, r => r.Node.Statement.Contains("service.sh"));
+    }
+
+    [Fact]
+    public async Task Unlinked_owners_are_not_reachable()
+    {
+        var alice = new Namespace("alice", MemoryScope.User, "u1");
+        var mallory = new Namespace("mallory", MemoryScope.User, "u1");
+
+        var (engine, _) = NewEngine(TimeProvider.System);
+        await engine.RememberAsync(alice, "Deploys run through service.sh",
+            GraphEdge.Create("deploy", "runs through", "service.sh"));
+
+        Assert.Empty(await engine.RecallAsync(mallory, "how do deploys run", topK: 5));
     }
 
     public void Dispose()

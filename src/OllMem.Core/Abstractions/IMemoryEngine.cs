@@ -46,4 +46,17 @@ public interface IMemoryEngine
         string subject,
         string? predicate = null,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Declare two owner identities as the same caller (e.g. the same person's
+    /// two machines/signing keys), widening recall to consider both without
+    /// merging or moving either owner's namespaces.
+    /// </summary>
+    ValueTask LinkOwnersAsync(string ownerA, string ownerB, CancellationToken ct = default);
+
+    /// <summary>Remove a previously declared owner link.</summary>
+    ValueTask UnlinkOwnersAsync(string ownerA, string ownerB, CancellationToken ct = default);
+
+    /// <summary>The full linked-owner set for <paramref name="owner"/>, including itself.</summary>
+    ValueTask<IReadOnlySet<string>> GetLinkedOwnersAsync(string owner, CancellationToken ct = default);
 }

@@ -22,6 +22,19 @@ public interface IVectorStore
         int topK,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// Like <see cref="SearchAsync"/>, but spanning every namespace belonging to
+    /// any of <paramref name="owners"/> — all scopes and scopeIds — so recall can
+    /// reach sibling namespaces and linked identities (see
+    /// <see cref="IOwnerLinkStore"/>) without loading the whole store.
+    /// Owner matching is case-insensitive, matching <see cref="Namespace.Key"/>.
+    /// </summary>
+    ValueTask<IReadOnlyList<(MemoryNode Node, double Similarity)>> SearchOwnersAsync(
+        IReadOnlySet<string> owners,
+        float[] queryEmbedding,
+        int topK,
+        CancellationToken ct = default);
+
     /// <summary>All active nodes in a namespace (used by conflict resolution).</summary>
     ValueTask<IReadOnlyList<MemoryNode>> ListActiveAsync(Namespace ns, CancellationToken ct = default);
 

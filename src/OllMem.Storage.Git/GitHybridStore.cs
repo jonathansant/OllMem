@@ -67,6 +67,38 @@ public sealed class GitHybridStore : IVectorStore, IGraphStore
             .ToList();
     }
 
+    public async ValueTask<IReadOnlyList<(MemoryNode Node, double Similarity)>> SearchOwnersAsync(
+        IReadOnlySet<string> owners, float[] queryEmbedding, int topK, CancellationToken ct = default)
+    {
+        if (owners.Count == 0)
+            return [];
+
+        await _ctx.Gate.WaitAsync(ct);
+        try
+        {
+            // The top level of nodes/ is one directory per owner, named from the
+            // lower-cased owner, so this reads only the requested owners' files
+            // instead of walking the whole tree.
+            var files = owners
+                .Select(o => Path.Combine(_ctx.NodesDirectory, EscapeSegment(o)))
+                .Where(Directory.Exists)
+                .SelectMany(dir => Directory.EnumerateFiles(dir, "*.json", SearchOption.AllDirectories));
+
+            return files
+                .Select(ReadNode)
+                .OfType<MemoryNode>()
+                .Where(n => n.Status == MemoryStatus.Active && n.Embedding.Length == queryEmbedding.Length)
+                .Select(n => (Node: n, Similarity: HashingEmbeddingService.CosineSimilarity(queryEmbedding, n.Embedding)))
+                .OrderByDescending(x => x.Similarity)
+                .Take(Math.Max(0, topK))
+                .ToList();
+        }
+        finally
+        {
+            _ctx.Gate.Release();
+        }
+    }
+
     public async ValueTask<IReadOnlyList<MemoryNode>> ListActiveAsync(
         Namespace ns, CancellationToken ct = default)
     {

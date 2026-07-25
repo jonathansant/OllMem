@@ -34,6 +34,7 @@ public sealed class GitStoreContext : IAsyncDisposable
     internal string NodesDirectory { get; }
     internal string BlobsDirectory { get; }
     internal string AuditDirectory { get; }
+    internal string LinksDirectory { get; }
 
     /// <summary>
     /// Stable id of this clone, used to name its private audit chain file.
@@ -52,6 +53,7 @@ public sealed class GitStoreContext : IAsyncDisposable
         NodesDirectory = Path.Combine(Root, "nodes");
         BlobsDirectory = Path.Combine(Root, "blobs");
         AuditDirectory = Path.Combine(Root, "audit");
+        LinksDirectory = Path.Combine(Root, "links");
         _git = new GitCli(Root);
         _identityArgs =
         [
@@ -121,6 +123,7 @@ public sealed class GitStoreContext : IAsyncDisposable
         Directory.CreateDirectory(NodesDirectory);
         Directory.CreateDirectory(BlobsDirectory);
         Directory.CreateDirectory(AuditDirectory);
+        Directory.CreateDirectory(LinksDirectory);
 
         // Writes that never got committed (process killed before the debounce
         // fired) are still on disk; fold them into a commit before syncing.
@@ -285,8 +288,9 @@ public sealed class GitStoreContext : IAsyncDisposable
             return string.Join('\n', union) + "\n";
         }
 
-        // Blobs are content-addressed: the same ref is the same bytes, so
-        // either side is correct.
+        // Blobs and owner links are content-addressed / canonically-named: the
+        // same filename can only ever hold the same content, so either side
+        // is correct.
         return theirs;
     }
 

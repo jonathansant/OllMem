@@ -58,16 +58,25 @@ public sealed record MemoryDto(
 
 public sealed record RememberResponse(MemoryDto Memory, Guid? SupersededId);
 
+public sealed record NamespaceDto(string Owner, string Scope, string ScopeId)
+{
+    public static NamespaceDto From(Namespace ns) => new(ns.Owner, ns.Scope.ToString(), ns.ScopeId);
+}
+
 public sealed record ScoredMemoryDto(
     MemoryDto Memory,
+    NamespaceDto Namespace,
     double Similarity,
     double DecayWeight,
+    double NamespaceAffinity,
     double FinalScore)
 {
     public static ScoredMemoryDto From(ScoredMemory s) => new(
         MemoryDto.From(s.Node),
+        NamespaceDto.From(s.Node.Namespace),
         Math.Round(s.Similarity, 4),
         Math.Round(s.DecayWeight, 4),
+        Math.Round(s.NamespaceAffinity, 4),
         Math.Round(s.FinalScore, 4));
 }
 
