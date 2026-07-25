@@ -119,10 +119,22 @@ ollmem_link_owners  owner=laptop-key  otherOwner=desktop-key
 Links are symmetric and transitive — link `laptop ⇄ desktop` and
 `desktop ⇄ phone` and all three become one identity, so you only need one link
 per new machine. Nothing is merged, moved or re-encrypted: each owner keeps its
-own namespaces, and recall simply widens to consider all of them. Use
-`ollmem_linked_owners` to see the current set and `ollmem_unlink_owners` to undo
-it. With git storage the link travels through your remote, so linking on one
-machine applies on the others after they sync.
+own namespaces, and recall simply widens to consider all of them. With git
+storage the link travels through your remote, so linking on one machine applies
+on the others after they sync.
+
+### Seeing which owners are linked
+
+Three ways, depending on where you are:
+
+| Where | How |
+|-------|-----|
+| From your assistant | `ollmem_linked_owners` with any owner id — returns the whole identity, following links transitively |
+| In the browser | The **linked identities** bar at the top of [`/graph`](#see-the-graph-in-your-browser-graph) |
+| From the API | `curl -s "$BASE/v1/graph"` → the `ownerLinks` array (one entry per pair) |
+| On disk (git storage) | One file per pair under `<memory repo>/links/`, e.g. `links/laptop-key__desktop-key.json` |
+
+Use `ollmem_unlink_owners` to undo a link.
 
 Linking is deliberately **not** exposed over the HTTP API: a one-sided link
 created against a signed API would let one tenant pull another's memories, so it

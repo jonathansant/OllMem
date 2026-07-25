@@ -69,7 +69,7 @@ For users (simple, no prior knowledge needed):
 
 For developers:
 
-- [Architecture](docs/developer-guide/architecture.md) — solution layout, component model, life of a fact, PRD traceability
+- [Architecture](docs/developer-guide/architecture.md) — solution layout, component model, life of a fact, namespace affinity + owner links, PRD traceability
 - [Extending the model backend](docs/developer-guide/extending-models.md) — plug in other LLMs / embedding models
 - [Extending storage](docs/developer-guide/extending-storage.md) — plug in other databases, blob networks (Walrus/IPFS), audit ledgers
 
@@ -80,6 +80,13 @@ For developers:
 - **Hybrid recall** — knowledge graph + vector search, reranked by a
   soft-decay freshness weight so stale facts fade but never vanish
   (REQ-3.1/4.1/4.2).
+- **Scope-aware, not scope-blind** — recall also reaches sibling scopeIds and
+  scope tiers, ranked below an exact namespace match, so a fact doesn't go
+  missing because a scopeId convention drifted.
+- **One person, many machines** — link owner ids (`ollmem_link_owners`) and
+  recall spans all of them. Links are symmetric, transitive and sync with your
+  memory; nothing is merged or re-encrypted, and unlinked owners stay fully
+  compartmentalised.
 - **Verifiable & encrypted** — AES-256-GCM per-namespace encryption at rest,
   Ed25519 request signing, hash-chained tamper-evident audit log
   (REQ-1.3/2.3/3.3).

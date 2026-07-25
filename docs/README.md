@@ -15,7 +15,7 @@ Simple guides — no prior knowledge needed:
 
 Technical guides for developers:
 
-1. [Architecture](developer-guide/architecture.md) — how the pieces fit together, project layout, PRD traceability
+1. [Architecture](developer-guide/architecture.md) — how the pieces fit together, project layout, namespace affinity + owner links, PRD traceability
 2. [Extending the model backend](developer-guide/extending-models.md) — plug in different LLMs and embedding models (Ollama models, cloud APIs, your own)
 3. [Extending storage](developer-guide/extending-storage.md) — plug in different databases, blob networks (Walrus/IPFS) and audit ledgers
 
@@ -27,6 +27,8 @@ Technical guides for developers:
 | Give Claude Desktop (or any MCP client) a memory | [Using OllMem → MCP server](user-guide/usage.md#give-your-ai-assistant-a-memory-mcp) |
 | Keep memories after a restart | [Configuration → Persistence](user-guide/configuration.md#keeping-memories-forever-persistence) |
 | Share one memory across all my machines | [Configuration → Git storage](user-guide/configuration.md#git-storage--one-memory-on-all-your-machines) |
+| Use different owner ids on different machines | [Using OllMem → One person, several machines](user-guide/usage.md#one-person-several-machines) |
+| See which owners are linked | [Using OllMem → Linked identities](user-guide/usage.md#linked-identities) |
 | Use a different Ollama model | [Configuration → Models](user-guide/configuration.md#the-brain-model-settings) |
 | Use OpenAI/Anthropic/other cloud models | [Extending models](developer-guide/extending-models.md) |
 | Store vectors in pgvector / a graph DB / IPFS | [Extending storage](developer-guide/extending-storage.md) |

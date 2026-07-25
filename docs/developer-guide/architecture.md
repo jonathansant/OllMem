@@ -10,14 +10,14 @@ fact flows through it.
 OllMem.sln
 ├─ src/
 │  ├─ OllMem.Core/                 Domain + all engine services (no web deps)
-│  │  ├─ Domain/                  MemoryNode, GraphEdge, Namespace, MemoryScope…
+│  │  ├─ Domain/                  MemoryNode, GraphEdge, Namespace, MemoryScope, OwnerLink…
 │  │  ├─ Abstractions/            Interfaces for every swappable component
 │  │  ├─ Embeddings/              HashingEmbeddingService (deterministic, local)
 │  │  ├─ Storage/                 In-memory vector + graph + content-addressed blob
 │  │  ├─ Extraction/              RuleBasedFactExtractor (auto fact extraction)
 │  │  ├─ Security/                Ed25519, AES-256-GCM cipher, hash-chained audit
 │  │  ├─ Retrieval/               SoftDecayScorer (decay + recency/usage weight)
-│  │  └─ Engine/                  OllMemMemoryEngine (orchestrator)
+│  │  └─ Engine/                  OllMemMemoryEngine (orchestrator) + NamespaceAffinityScorer
 │  ├─ OllMem.Models.Ollama/        Model backend: local Ollama server (embeddings + extraction)
 │  ├─ OllMem.Storage.Firestore/    Google Cloud Firestore-backed persistent stores (cloud memory)
 │  ├─ OllMem.Storage.Git/          Git-synced persistent stores (shared memory across machines)
@@ -50,6 +50,7 @@ the stack is untouched.
 | `IPayloadCipher` | per-namespace authenticated encryption | `AesGcmPayloadCipher` | — |
 | `ISignatureScheme` | ownership assertion (Ed25519) | `Ed25519SignatureScheme` | — |
 | `IDecayScorer` | non-destructive relevance decay | `SoftDecayScorer` | — |
+| `IOwnerLinkStore` | which owner ids are the same caller | `InMemoryOwnerLinkStore` | `SqliteOwnerLinkStore`, `GitOwnerLinkStore`, `FirestoreOwnerLinkStore` |
 | `IMemoryEngine` | orchestrator over all of the above | `OllMemMemoryEngine` | — |
 
 Composition happens in the hosts (`OllMem.Api/Program.cs`,
@@ -88,12 +89,20 @@ implementations.
 **Read path** (`RecallAsync`):
 
 1. Embed the query.
-2. `IVectorStore.SearchAsync` ranks active nodes by cosine similarity.
-3. `IDecayScorer.Weight` computes a freshness multiplier in `[floor, 1.0]`
+2. `IVectorStore.SearchAsync` ranks active nodes in the caller's own namespace
+   by cosine similarity.
+3. `IOwnerLinkStore.GetLinkedOwnersAsync` resolves the caller's identity, and
+   `IVectorStore.SearchOwnersAsync` ranks candidates across every namespace
+   those owners hold (see [Recall reaches beyond the exact
+   namespace](#recall-reaches-beyond-the-exact-namespace)).
+4. `IDecayScorer.Weight` computes a freshness multiplier in `[floor, 1.0]`
    from recency (exponential, `HalfLifeDays`) and usage (log-scaled
    `AccessCount`).
-4. Results are reranked by `similarity × decayWeight`; access stats of the
-   returned nodes are updated (feeding back into future decay).
+5. `NamespaceAffinityScorer.Score` weights each candidate by how close its
+   namespace is to the caller's.
+6. Results are deduplicated and reranked by
+   `similarity × decayWeight × namespaceAffinity`; access stats of the returned
+   nodes are updated (feeding back into future decay).
 
 ## Namespaces and scopes
 
@@ -103,6 +112,57 @@ canonical `Key`, and every encryption key is derived per namespace, so
 namespaces are isolated both logically and cryptographically. When request
 signing is enabled, the verified Ed25519 public key *becomes* the owner
 (`SignatureAuthMiddleware`), making ownership unforgeable.
+
+### Recall reaches beyond the exact namespace
+
+An exact `(owner, scope, scopeId)` match is not the only thing recall sees.
+`OllMemMemoryEngine.RecallAsync` issues two queries:
+
+1. `IVectorStore.SearchAsync(ns, …)` — the caller's own namespace, always fully
+   considered so it can never be crowded out.
+2. `IVectorStore.SearchOwnersAsync(linkedOwners, …)` — every namespace belonging
+   to the caller's owner *or* an owner linked to it.
+
+Candidates are then merged, deduplicated, and weighted by
+`NamespaceAffinityScorer`:
+
+| Relationship to the querying namespace | Weight |
+|----------------------------------------|--------|
+| the same namespace | `1.0` |
+| same (or linked) owner, sharing scope or scopeId | `0.9` |
+| same (or linked) owner, different scope tier and scopeId | `0.75` |
+
+`FinalScore = similarity × decayWeight × namespaceAffinity`, so an exact match
+still wins a tie while a sibling namespace stops being invisible. Candidates
+from outside the caller's own namespace must also clear a small raw-similarity
+floor, so widening the search doesn't drag in noise.
+
+Crucially, an *unrelated* owner is **filtered out**, never merely down-weighted
+— `SearchOwnersAsync` is only ever given the linked-owner set. Compartmentalisation
+(REQ-1.3) is preserved by construction rather than by a small multiplier.
+
+### Owner links
+
+`IOwnerLinkStore` records that two owner ids are the same real-world caller —
+the same person signing from two machines with two keys. Links are symmetric and
+transitive: each connected component of the link graph is one identity.
+
+Linking never merges, moves or re-encrypts anything. Each owner keeps its own
+namespaces and its own derived encryption keys; the link only widens the owner
+set `RecallAsync` passes to `SearchOwnersAsync`.
+
+`GetAllLinksAsync()` enumerates links for visualisation/administration; the
+recall hot path uses `GetLinkedOwnersAsync(owner)` instead. Every persistent
+backend implements the store, so with git storage a link syncs between machines
+like any other memory (`links/<a>__<b>.json`, named by the canonically sorted
+pair so two machines linking the same pair can't conflict).
+
+Linking is exposed on the **MCP surface only** (`ollmem_link_owners`,
+`ollmem_unlink_owners`, `ollmem_linked_owners`). It is deliberately absent from
+the HTTP API: linking is not an authenticated operation, so a one-sided link
+created elsewhere would otherwise unlock another tenant's namespaces through a
+signed endpoint. For the same reason `/v1/graph` never lets links widen what a
+verified caller can see — it only shows that caller their own links.
 
 ## Tuning the engine
 
