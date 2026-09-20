@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using OllMem.Core.Abstractions;
@@ -52,6 +53,7 @@ public static class OllMemMemoryTools
         {
             stored = ToMemory(result.Node),
             supersededId = result.SupersededId,
+            outcome = result.Outcome.ToString(),
         });
     }
 
@@ -78,7 +80,8 @@ public static class OllMemMemoryTools
 
     [McpServerTool(Name = "ollmem_recall")]
     [Description("Recall the most relevant memories for a query using hybrid semantic search with time-aware " +
-                 "reranking (recent and frequently used facts are prioritised). Returns ranked memories with scores.")]
+                 "reranking (recent and frequently used facts are prioritised). Returns ranked memories with scores. " +
+                 "Pass asOf to answer as the memory stood at a past instant instead of now.")]
     public static async Task<string> RecallAsync(
         IMemoryEngine engine,
         [Description("Owner identity (e.g. tenant or signing key).")] string owner,
@@ -86,10 +89,13 @@ public static class OllMemMemoryTools
         [Description("Identifier within the scope.")] string scopeId,
         [Description("Natural-language query describing what to recall.")] string query,
         [Description("Maximum number of memories to return (1-100). Default 5.")] int topK = 5,
+        [Description("Optional ISO-8601 instant, e.g. '2026-01-31T00:00:00Z'. Recall the memory as it stood " +
+                     "then: facts recorded later are invisible and facts retired since are current again. " +
+                     "A historical recall does not count as an access.")] string? asOf = null,
         CancellationToken ct = default)
     {
         var ns = ResolveNamespace(owner, scope, scopeId);
-        var results = await engine.RecallAsync(ns, query, Math.Clamp(topK, 1, 100), ct);
+        var results = await engine.RecallAsync(ns, query, Math.Clamp(topK, 1, 100), ParseAsOf(asOf), ct);
         return Serialize(results.Select(s => new
         {
             memory = ToMemory(s.Node),
@@ -103,8 +109,28 @@ public static class OllMemMemoryTools
 
     [McpServerTool(Name = "ollmem_neighbors")]
     [Description("Traverse the knowledge graph: list the relationships (edges) for an entity, optionally filtered " +
-                 "by predicate. For example subject='user' returns everything currently known about the user.")]
+                 "by predicate. For example subject='user' returns everything currently known about the user. " +
+                 "Pass asOf to traverse the graph as it stood at a past instant.")]
     public static async Task<string> NeighborsAsync(
+        IMemoryEngine engine,
+        [Description("Owner identity (e.g. tenant or signing key).")] string owner,
+        [Description("Memory tier: user, agent, or session.")] string scope,
+        [Description("Identifier within the scope.")] string scopeId,
+        [Description("Entity to inspect, e.g. 'user'.")] string subject,
+        [Description("Optional predicate filter, e.g. 'lives in'.")] string? predicate = null,
+        [Description("Optional ISO-8601 instant to traverse the graph as it stood then.")] string? asOf = null,
+        CancellationToken ct = default)
+    {
+        var ns = ResolveNamespace(owner, scope, scopeId);
+        var edges = await engine.NeighborsAsync(ns, subject, predicate, ParseAsOf(asOf), ct);
+        return Serialize(edges.Select(e => new { e.Subject, e.Predicate, e.Object }));
+    }
+
+    [McpServerTool(Name = "ollmem_history")]
+    [Description("Show how a relationship changed over time: every version of it, oldest first, each with the " +
+                 "window it was true for. validTo is null for the version that is still current. Use this to " +
+                 "answer 'what did we believe before' and 'when did this change'.")]
+    public static async Task<string> HistoryAsync(
         IMemoryEngine engine,
         [Description("Owner identity (e.g. tenant or signing key).")] string owner,
         [Description("Memory tier: user, agent, or session.")] string scope,
@@ -114,8 +140,55 @@ public static class OllMemMemoryTools
         CancellationToken ct = default)
     {
         var ns = ResolveNamespace(owner, scope, scopeId);
-        var edges = await engine.NeighborsAsync(ns, subject, predicate, ct);
-        return Serialize(edges.Select(e => new { e.Subject, e.Predicate, e.Object }));
+        var entries = await engine.HistoryAsync(ns, subject, predicate, ct);
+        return Serialize(new
+        {
+            count = entries.Count,
+            entries = entries.Select(e => new
+            {
+                memory = ToMemory(e.Node),
+                validFrom = e.ValidFrom,
+                validTo = e.ValidTo,
+                current = e.ValidTo is null,
+            }),
+        });
+    }
+
+    [McpServerTool(Name = "ollmem_consolidate")]
+    [Description("Wrap up a session: summarise everything stored in a session scope into durable facts, save " +
+                 "them in an agent or user scope, and mark the session memories consolidated so they leave " +
+                 "recall but stay in history. Run with dryRun=true first to see what would be promoted. " +
+                 "Safe to run twice — the second run finds nothing left to promote.")]
+    public static async Task<string> ConsolidateAsync(
+        IMemoryEngine engine,
+        [Description("Owner identity (e.g. tenant or signing key).")] string owner,
+        [Description("The session id to drain (the scopeId of the session-scoped memories).")] string sessionId,
+        [Description("Where to promote the facts: 'agent' or 'user'. Default 'agent'.")] string targetScope = "agent",
+        [Description("Identifier within the target scope. Default 'default'.")] string targetScopeId = "default",
+        [Description("Preview only: report the facts without writing anything. Default false.")] bool dryRun = false,
+        CancellationToken ct = default)
+    {
+        var source = ResolveNamespace(owner, "session", sessionId);
+        var target = ResolveNamespace(owner, targetScope, targetScopeId);
+        var result = await engine.ConsolidateAsync(source, target, dryRun, ct);
+
+        return Serialize(new
+        {
+            dryRun = result.DryRun,
+            target = target.Key,
+            facts = result.Facts.Select(f => new
+            {
+                statement = f.Statement,
+                edge = new { f.Edge.Subject, f.Edge.Predicate, f.Edge.Object },
+            }),
+            promoted = result.Promoted.Select(r => new
+            {
+                outcome = r.Outcome.ToString(),
+                memory = ToMemory(r.Node),
+                supersededId = r.SupersededId,
+            }),
+            retiredSessionMemories = result.RetiredSessionIds,
+        });
     }
 
     [McpServerTool(Name = "ollmem_link_owners")]
@@ -159,6 +232,17 @@ public static class OllMemMemoryTools
         return Serialize(new { linkedOwners = linked.OrderBy(o => o, StringComparer.OrdinalIgnoreCase) });
     }
 
+    private static DateTimeOffset? ParseAsOf(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+        if (DateTimeOffset.TryParse(
+                value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed))
+            return parsed;
+
+        throw new ArgumentException($"asOf must be an ISO-8601 instant, e.g. '2026-01-31T00:00:00Z'.", nameof(value));
+    }
+
     private static Namespace ResolveNamespace(string owner, string scope, string scopeId)
     {
         if (string.IsNullOrWhiteSpace(owner))
@@ -178,6 +262,7 @@ public static class OllMemMemoryTools
         accessCount = n.AccessCount,
         createdAt = n.CreatedAt,
         lastAccessedAt = n.LastAccessedAt,
+        retiredAt = n.RetiredAt,
     };
 
     private static string Serialize(object value) => JsonSerializer.Serialize(value, Json);

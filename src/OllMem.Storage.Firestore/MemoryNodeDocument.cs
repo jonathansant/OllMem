@@ -28,6 +28,7 @@ internal sealed class MemoryNodeDocument
     [FirestoreProperty("accessCount")] public int AccessCount { get; set; }
     [FirestoreProperty("status")] public int Status { get; set; }
     [FirestoreProperty("supersededBy")] public string? SupersededBy { get; set; }
+    [FirestoreProperty("retiredAt")] public string? RetiredAt { get; set; }
 
     public static MemoryNodeDocument From(MemoryNode node) => new()
     {
@@ -50,6 +51,7 @@ internal sealed class MemoryNodeDocument
         AccessCount = node.AccessCount,
         Status = (int)node.Status,
         SupersededBy = node.SupersededBy?.ToString(),
+        RetiredAt = node.RetiredAt is { } retired ? Iso(retired) : null,
     };
 
     public MemoryNode ToNode(Guid id) => new()
@@ -65,6 +67,7 @@ internal sealed class MemoryNodeDocument
         AccessCount = AccessCount,
         Status = (MemoryStatus)Status,
         SupersededBy = SupersededBy is null ? null : Guid.Parse(SupersededBy),
+        RetiredAt = string.IsNullOrEmpty(RetiredAt) ? null : ParseIso(RetiredAt),
     };
 
     internal static byte[] EmbeddingToBytes(float[] vector) =>

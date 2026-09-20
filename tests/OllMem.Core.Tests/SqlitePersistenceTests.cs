@@ -184,4 +184,111 @@ public sealed class SqlitePersistenceTests : IDisposable
             try { if (File.Exists(f)) File.Delete(f); } catch { /* best effort */ }
         }
     }
+
+    [Fact]
+    public async Task Retirement_and_history_survive_a_restart()
+    {
+        var ns = new Namespace("owner", MemoryScope.User, "u1");
+        var clock = new TestClock(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        var start = clock.GetUtcNow();
+
+        var (engine1, _) = NewEngine(clock);
+        await engine1.RememberAsync(ns, "User lives in Lisbon", GraphEdge.Create("user", "lives in", "Lisbon"));
+        clock.Advance(TimeSpan.FromDays(3));
+        await engine1.RememberAsync(ns, "User lives in Porto", GraphEdge.Create("user", "lives in", "Porto"));
+        var moved = clock.GetUtcNow();
+
+        // Second "process": the validity windows have to come back off disk.
+        var (engine2, _) = NewEngine(clock);
+        var history = await engine2.HistoryAsync(ns, "user", "lives in");
+
+        Assert.Equal(2, history.Count);
+        Assert.Equal(start, history[0].ValidFrom);
+        Assert.Equal(moved, history[0].ValidTo);
+        Assert.Null(history[1].ValidTo);
+
+        var then = await engine2.RecallAsync(ns, "where does the user live", topK: 5, asOf: start);
+        Assert.Contains("Lisbon", Assert.Single(then).Node.Statement);
+    }
+
+    [Fact]
+    public async Task A_database_from_before_retirement_tracking_is_migrated_in_place()
+    {
+        var legacyPath = Path.Combine(Path.GetTempPath(), $"ollmem-legacy-{Guid.NewGuid():N}.db");
+        var id = Guid.NewGuid();
+        try
+        {
+            CreateLegacyDatabase(legacyPath, id);
+
+            // Opening it with the current code adds the column and leaves the
+            // existing row readable, with no retirement recorded.
+            var ctx = SqliteStoreContext.ForFile(legacyPath);
+            var store = new SqliteHybridStore(ctx);
+
+            var node = await store.GetAsync(id);
+            Assert.NotNull(node);
+            Assert.Equal("User lives in Lisbon", node!.Statement);
+            Assert.Null(node.RetiredAt);
+
+            // And the column is now writable like any other.
+            node.RetiredAt = new DateTimeOffset(2026, 2, 1, 0, 0, 0, TimeSpan.Zero);
+            node.Status = MemoryStatus.Superseded;
+            await store.UpsertAsync(node);
+
+            var reloaded = await store.GetAsync(id);
+            Assert.Equal(node.RetiredAt, reloaded!.RetiredAt);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            if (File.Exists(legacyPath))
+                File.Delete(legacyPath);
+        }
+    }
+
+    /// <summary>Writes a memories table in the shape OllMem used before retirement tracking.</summary>
+    private static void CreateLegacyDatabase(string path, Guid id)
+    {
+        using var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={path}");
+        conn.Open();
+
+        using var create = conn.CreateCommand();
+        create.CommandText =
+            """
+            CREATE TABLE memories (
+                id               TEXT PRIMARY KEY,
+                namespace_key    TEXT NOT NULL,
+                owner            TEXT NOT NULL,
+                scope            INTEGER NOT NULL,
+                scope_id         TEXT NOT NULL,
+                statement        TEXT NOT NULL,
+                subject          TEXT NOT NULL,
+                predicate        TEXT NOT NULL,
+                object           TEXT NOT NULL,
+                embedding        BLOB NOT NULL,
+                blob_ref         TEXT,
+                created_at       TEXT NOT NULL,
+                last_accessed_at TEXT NOT NULL,
+                access_count     INTEGER NOT NULL,
+                status           INTEGER NOT NULL,
+                superseded_by    TEXT
+            );
+            """;
+        create.ExecuteNonQuery();
+
+        using var insert = conn.CreateCommand();
+        insert.CommandText =
+            """
+            INSERT INTO memories
+                (id, namespace_key, owner, scope, scope_id, statement, subject, predicate, object,
+                 embedding, blob_ref, created_at, last_accessed_at, access_count, status, superseded_by)
+            VALUES
+                ($id, 'owner/user/u1', 'owner', 1, 'u1', 'User lives in Lisbon', 'user', 'lives in', 'Lisbon',
+                 $embedding, NULL, '2026-01-01T00:00:00.0000000+00:00', '2026-01-01T00:00:00.0000000+00:00',
+                 0, 0, NULL);
+            """;
+        insert.Parameters.AddWithValue("$id", id.ToString());
+        insert.Parameters.AddWithValue("$embedding", new byte[16]);
+        insert.ExecuteNonQuery();
+    }
 }

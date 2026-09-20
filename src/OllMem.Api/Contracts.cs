@@ -1,3 +1,4 @@
+using OllMem.Core.Abstractions;
 using OllMem.Core.Domain;
 using OllMem.Core.Engine;
 
@@ -35,6 +36,27 @@ public sealed record RecallRequest : ScopedRequest
 {
     public string Query { get; init; } = "";
     public int TopK { get; init; } = 5;
+
+    /// <summary>
+    /// Optional viewpoint: answer as the memory stood at this instant instead
+    /// of now. A historical recall does not update access statistics.
+    /// </summary>
+    public DateTimeOffset? AsOf { get; init; }
+}
+
+/// <summary>Promote a session namespace's memories into a durable one.</summary>
+public sealed record ConsolidateRequest : ScopedRequest
+{
+    /// <summary>The session id to drain.</summary>
+    public string SessionId { get; init; } = "";
+
+    /// <summary>Where to promote the facts: agent or user.</summary>
+    public string TargetScope { get; init; } = "agent";
+
+    public string TargetScopeId { get; init; } = "default";
+
+    /// <summary>Report what would be promoted without writing anything.</summary>
+    public bool DryRun { get; init; }
 }
 
 public sealed record EdgeDto(string Subject, string Predicate, string Object)
@@ -50,14 +72,50 @@ public sealed record MemoryDto(
     string? BlobRef,
     int AccessCount,
     DateTimeOffset CreatedAt,
-    DateTimeOffset LastAccessedAt)
+    DateTimeOffset LastAccessedAt,
+    DateTimeOffset? RetiredAt)
 {
     public static MemoryDto From(MemoryNode n) => new(
         n.Id, n.Statement, EdgeDto.From(n.Edge), n.Status.ToString(),
-        n.BlobRef, n.AccessCount, n.CreatedAt, n.LastAccessedAt);
+        n.BlobRef, n.AccessCount, n.CreatedAt, n.LastAccessedAt, n.RetiredAt);
 }
 
-public sealed record RememberResponse(MemoryDto Memory, Guid? SupersededId);
+public sealed record RememberResponse(MemoryDto Memory, Guid? SupersededId, string Outcome)
+{
+    public static RememberResponse From(RememberResult r) =>
+        new(MemoryDto.From(r.Node), r.SupersededId, r.Outcome.ToString());
+}
+
+/// <summary>One version of a relation, with the window it was current for.</summary>
+public sealed record HistoryEntryDto(
+    MemoryDto Memory,
+    DateTimeOffset ValidFrom,
+    DateTimeOffset? ValidTo,
+    bool Current)
+{
+    public static HistoryEntryDto From(MemoryHistoryEntry e) =>
+        new(MemoryDto.From(e.Node), e.ValidFrom, e.ValidTo, e.ValidTo is null);
+}
+
+public sealed record ConsolidateFactDto(string Statement, EdgeDto Edge)
+{
+    public static ConsolidateFactDto From(ExtractedFact f) => new(f.Statement, EdgeDto.From(f.Edge));
+}
+
+public sealed record ConsolidateResponse(
+    bool DryRun,
+    string Target,
+    IReadOnlyList<ConsolidateFactDto> Facts,
+    IReadOnlyList<RememberResponse> Promoted,
+    IReadOnlyList<Guid> RetiredSessionMemories)
+{
+    public static ConsolidateResponse From(ConsolidateResult r, Namespace target) => new(
+        r.DryRun,
+        target.Key,
+        r.Facts.Select(ConsolidateFactDto.From).ToList(),
+        r.Promoted.Select(RememberResponse.From).ToList(),
+        r.RetiredSessionIds);
+}
 
 public sealed record NamespaceDto(string Owner, string Scope, string ScopeId)
 {

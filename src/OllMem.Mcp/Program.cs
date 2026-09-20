@@ -53,6 +53,8 @@ else if (!string.IsNullOrWhiteSpace(sqlitePath))
 // key needed. Set OLLMEM_OLLAMA=off to pin the deterministic offline components;
 // OLLMEM_OLLAMA_ENDPOINT / OLLMEM_OLLAMA_EMBED_MODEL / OLLMEM_OLLAMA_CHAT_MODEL
 // override the defaults (http://localhost:11434, nomic-embed-text, llama3.2).
+// OLLMEM_OLLAMA_RECONCILE=off and OLLMEM_OLLAMA_CONSOLIDATE=off pin the
+// deterministic rules for semantic conflict detection and session consolidation.
 builder.Services.AddOllMemOllamaModels(o =>
 {
     o.Enabled = !string.Equals(
@@ -60,6 +62,10 @@ builder.Services.AddOllMemOllamaModels(o =>
     o.Endpoint = Environment.GetEnvironmentVariable("OLLMEM_OLLAMA_ENDPOINT") ?? o.Endpoint;
     o.EmbeddingModel = Environment.GetEnvironmentVariable("OLLMEM_OLLAMA_EMBED_MODEL") ?? o.EmbeddingModel;
     o.ChatModel = Environment.GetEnvironmentVariable("OLLMEM_OLLAMA_CHAT_MODEL") ?? o.ChatModel;
+    o.UseChatReconciliation = !string.Equals(
+        Environment.GetEnvironmentVariable("OLLMEM_OLLAMA_RECONCILE"), "off", StringComparison.OrdinalIgnoreCase);
+    o.UseChatConsolidation = !string.Equals(
+        Environment.GetEnvironmentVariable("OLLMEM_OLLAMA_CONSOLIDATE"), "off", StringComparison.OrdinalIgnoreCase);
 });
 
 // The OllMem stack. Provide a persistent encryption key via the

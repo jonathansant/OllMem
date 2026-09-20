@@ -266,4 +266,177 @@ public class ApiIntegrationTests : IClassFixture<ApiIntegrationTests.OfflineFact
         var json = await res.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(64, json.GetProperty("publicKeyHex").GetString()!.Length);
     }
+
+    [Fact]
+    public async Task Remember_reports_which_write_path_was_taken()
+    {
+        var owner = $"owner-{Guid.NewGuid():N}";
+
+        async Task<JsonElement> Remember(string statement, string obj)
+        {
+            var res = await _client.PostAsJsonAsync("/v1/remember", new
+            {
+                owner, scope = "user", scopeId = "u1",
+                statement, subject = "user", predicate = "lives in", @object = obj,
+            });
+            res.EnsureSuccessStatusCode();
+            return await res.Content.ReadFromJsonAsync<JsonElement>();
+        }
+
+        var created = await Remember("User lives in Berlin", "Berlin");
+        var refreshed = await Remember("User lives in Berlin", "Berlin");
+        var superseded = await Remember("User lives in Munich", "Munich");
+
+        Assert.Equal("Created", created.GetProperty("outcome").GetString());
+        Assert.Equal("Refreshed", refreshed.GetProperty("outcome").GetString());
+        Assert.Equal("Superseded", superseded.GetProperty("outcome").GetString());
+        Assert.NotEqual(Guid.Empty, superseded.GetProperty("supersededId").GetGuid());
+    }
+
+    [Fact]
+    public async Task History_and_as_of_recall_expose_the_old_answer()
+    {
+        var owner = $"owner-{Guid.NewGuid():N}";
+
+        foreach (var city in new[] { "Berlin", "Munich" })
+        {
+            var res = await _client.PostAsJsonAsync("/v1/remember", new
+            {
+                owner, scope = "user", scopeId = "u1",
+                statement = $"User lives in {city}", subject = "user", predicate = "lives in", @object = city,
+            });
+            res.EnsureSuccessStatusCode();
+        }
+
+        var historyRes = await _client.GetAsync(
+            $"/v1/history?owner={owner}&scope=user&scopeId=u1&subject=user&predicate=lives%20in");
+        historyRes.EnsureSuccessStatusCode();
+        var history = await historyRes.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(2, history.GetProperty("count").GetInt32());
+        var entries = history.GetProperty("entries");
+        var first = entries[0];
+        Assert.Contains("Berlin", first.GetProperty("memory").GetProperty("statement").GetString()!);
+        Assert.False(first.GetProperty("current").GetBoolean());
+        Assert.True(entries[1].GetProperty("current").GetBoolean());
+
+        // The instant Berlin stopped being true is the viewpoint to look before.
+        var changedAt = first.GetProperty("validTo").GetDateTimeOffset();
+        var recall = await _client.PostAsJsonAsync("/v1/recall", new
+        {
+            owner, scope = "user", scopeId = "u1",
+            query = "where does the user live", topK = 3,
+            asOf = changedAt.AddTicks(-1),
+        });
+        recall.EnsureSuccessStatusCode();
+        var results = await recall.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(1, results.GetArrayLength());
+        Assert.Contains("Berlin", results[0].GetProperty("memory").GetProperty("statement").GetString()!);
+    }
+
+    [Fact]
+    public async Task Neighbors_can_be_traversed_as_of_a_past_instant()
+    {
+        var owner = $"owner-{Guid.NewGuid():N}";
+
+        foreach (var city in new[] { "Berlin", "Munich" })
+        {
+            var res = await _client.PostAsJsonAsync("/v1/remember", new
+            {
+                owner, scope = "user", scopeId = "u1",
+                statement = $"User lives in {city}", subject = "user", predicate = "lives in", @object = city,
+            });
+            res.EnsureSuccessStatusCode();
+        }
+
+        var historyRes = await _client.GetAsync(
+            $"/v1/history?owner={owner}&scope=user&scopeId=u1&subject=user");
+        var history = await historyRes.Content.ReadFromJsonAsync<JsonElement>();
+        var changedAt = history.GetProperty("entries")[0].GetProperty("validTo").GetDateTimeOffset();
+
+        var res2 = await _client.GetAsync(
+            $"/v1/neighbors?owner={owner}&scope=user&scopeId=u1&subject=user" +
+            $"&asOf={Uri.EscapeDataString(changedAt.AddTicks(-1).ToString("O"))}");
+        res2.EnsureSuccessStatusCode();
+        var edges = await res2.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(1, edges.GetArrayLength());
+        Assert.Equal("Berlin", edges[0].GetProperty("object").GetString());
+    }
+
+    [Fact]
+    public async Task Consolidate_previews_then_promotes_a_session()
+    {
+        var owner = $"owner-{Guid.NewGuid():N}";
+        var remember = await _client.PostAsJsonAsync("/v1/remember", new
+        {
+            owner, scope = "session", scopeId = "s1",
+            statement = "User prefers bun", subject = "user", predicate = "prefers", @object = "bun",
+        });
+        remember.EnsureSuccessStatusCode();
+
+        var preview = await _client.PostAsJsonAsync("/v1/consolidate", new
+        {
+            owner, sessionId = "s1", targetScope = "agent", targetScopeId = "a1", dryRun = true,
+        });
+        preview.EnsureSuccessStatusCode();
+        var previewBody = await preview.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.True(previewBody.GetProperty("dryRun").GetBoolean());
+        Assert.Equal(1, previewBody.GetProperty("facts").GetArrayLength());
+        Assert.Equal(0, previewBody.GetProperty("promoted").GetArrayLength());
+
+        // Nothing moved yet.
+        var beforeEdges = await _client.GetAsync($"/v1/neighbors?owner={owner}&scope=agent&scopeId=a1&subject=user");
+        Assert.Equal(0, (await beforeEdges.Content.ReadFromJsonAsync<JsonElement>()).GetArrayLength());
+
+        var real = await _client.PostAsJsonAsync("/v1/consolidate", new
+        {
+            owner, sessionId = "s1", targetScope = "agent", targetScopeId = "a1",
+        });
+        real.EnsureSuccessStatusCode();
+        var body = await real.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.False(body.GetProperty("dryRun").GetBoolean());
+        Assert.Equal(1, body.GetProperty("promoted").GetArrayLength());
+        Assert.Equal(1, body.GetProperty("retiredSessionMemories").GetArrayLength());
+
+        var afterEdges = await _client.GetAsync($"/v1/neighbors?owner={owner}&scope=agent&scopeId=a1&subject=user");
+        var edges = await afterEdges.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("bun", edges[0].GetProperty("object").GetString());
+
+        // The session view is empty, but the memory is still on record.
+        var sessionEdges = await _client.GetAsync($"/v1/neighbors?owner={owner}&scope=session&scopeId=s1&subject=user");
+        Assert.Equal(0, (await sessionEdges.Content.ReadFromJsonAsync<JsonElement>()).GetArrayLength());
+
+        var sessionHistory = await _client.GetAsync(
+            $"/v1/history?owner={owner}&scope=session&scopeId=s1&subject=user");
+        var entry = (await sessionHistory.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("entries")[0];
+        Assert.Equal("Consolidated", entry.GetProperty("memory").GetProperty("status").GetString());
+        Assert.False(entry.GetProperty("current").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Consolidate_rejects_a_session_target()
+    {
+        var owner = $"owner-{Guid.NewGuid():N}";
+
+        var res = await _client.PostAsJsonAsync("/v1/consolidate", new
+        {
+            owner, sessionId = "s1", targetScope = "session", targetScopeId = "s2",
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+    }
+
+    [Fact]
+    public async Task Consolidate_requires_a_session_id()
+    {
+        var owner = $"owner-{Guid.NewGuid():N}";
+
+        var res = await _client.PostAsJsonAsync("/v1/consolidate", new { owner, sessionId = "" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+    }
 }

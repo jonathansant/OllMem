@@ -8,7 +8,14 @@ namespace OllMem.Core.Domain;
 public enum MemoryStatus
 {
     Active = 0,
-    Superseded = 1
+    Superseded = 1,
+
+    /// <summary>
+    /// Promoted out of a session namespace into a durable one by
+    /// <c>ConsolidateAsync</c>. Like <see cref="Superseded"/> the row survives
+    /// for history and as-of recall; it is simply no longer current.
+    /// </summary>
+    Consolidated = 2
 }
 
 /// <summary>
@@ -50,4 +57,22 @@ public sealed class MemoryNode
 
     /// <summary>If superseded, the node that replaced this one.</summary>
     public Guid? SupersededBy { get; set; }
+
+    /// <summary>
+    /// When this memory stopped being current — set when it is superseded or
+    /// consolidated, together with <see cref="Status"/>. Null while active.
+    /// Memories written before this field existed leave it null even once
+    /// retired; readers resolve that case from <see cref="SupersededBy"/>.
+    /// </summary>
+    public DateTimeOffset? RetiredAt { get; set; }
+
+    /// <summary>
+    /// Whether this memory was the current state of the world at
+    /// <paramref name="asOf"/>, judged purely from its own timestamps.
+    /// Callers holding a retired node with no <see cref="RetiredAt"/> should
+    /// resolve the effective retirement instant first (see the engine's
+    /// history helpers) rather than relying on this method alone.
+    /// </summary>
+    public bool IsValidAt(DateTimeOffset asOf) =>
+        CreatedAt <= asOf && (RetiredAt is null || RetiredAt > asOf);
 }

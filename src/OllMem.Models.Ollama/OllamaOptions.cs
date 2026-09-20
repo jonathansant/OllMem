@@ -38,6 +38,21 @@ public sealed class OllamaOptions
     /// </summary>
     public bool UseChatExtraction { get; set; } = true;
 
+    /// <summary>
+    /// Use <see cref="ChatModel"/> to judge whether a new fact duplicates or
+    /// contradicts an existing one when a cosine threshold cannot tell. When
+    /// the model is unavailable or returns unusable output, the deterministic
+    /// threshold verdict stands.
+    /// </summary>
+    public bool UseChatReconciliation { get; set; } = true;
+
+    /// <summary>
+    /// Use <see cref="ChatModel"/> to summarise a session's memories when
+    /// consolidating them into a durable namespace. When the model is
+    /// unavailable or returns unusable output, the memories are promoted as-is.
+    /// </summary>
+    public bool UseChatConsolidation { get; set; } = true;
+
     /// <summary>Timeout for the one-time availability probe at startup.</summary>
     public TimeSpan ProbeTimeout { get; set; } = TimeSpan.FromSeconds(2);
 

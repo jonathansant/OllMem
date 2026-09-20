@@ -7,7 +7,10 @@ public enum AuditAction
     Create,
     Access,
     Update,
-    Supersede
+    Supersede,
+
+    /// <summary>A session memory was promoted into a durable namespace.</summary>
+    Consolidate
 }
 
 /// <summary>

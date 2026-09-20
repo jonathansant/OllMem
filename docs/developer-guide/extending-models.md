@@ -146,6 +146,54 @@ builder.Services.AddSingleton<IFactExtractor>(sp => new MyLlmFactExtractor(
 builder.Services.AddOllMemMemory();
 ```
 
+## Custom reconciler / consolidator
+
+Two more model-backed jobs follow exactly the same shape as the extractor:
+side-effect free, and degrading per call rather than throwing.
+
+**`IFactReconciler`** decides whether a new fact duplicates or contradicts the
+memories nearest to it:
+
+```csharp
+public readonly record struct ReconcileVerdict(ReconcileKind Kind, Guid? TargetId, string Reason);
+
+ValueTask<ReconcileVerdict> ReconcileAsync(
+    string statement, GraphEdge edge,
+    IReadOnlyList<(MemoryNode Node, double Similarity)> candidates,
+    CancellationToken ct = default);
+```
+
+- `Duplicate` refreshes the target instead of storing a copy; `Supersedes`
+  retires it; `Unrelated` keeps both.
+- `TargetId` must be one of the supplied candidates. The engine ignores a
+  verdict pointing anywhere else.
+- **Be conservative when unsure.** `Unrelated` only ever costs a duplicate;
+  a wrong `Supersedes` retires a fact the user still needed.
+- `OllamaFactReconciler` runs `ThresholdFactReconciler` first and only asks
+  the model about the ambiguous middle band, then falls back to that verdict
+  on any failure. Copy that layering.
+
+**`IMemoryConsolidator`** turns a session's memories into the facts worth
+keeping:
+
+```csharp
+ValueTask<IReadOnlyList<ExtractedFact>> ConsolidateAsync(
+    IReadOnlyList<MemoryNode> sessionMemories, CancellationToken ct = default);
+```
+
+It returns the same `ExtractedFact` the extractor produces, so the engine
+stores them through the normal write path. An empty list is a legitimate
+answer ("nothing here is durable") — return the fallback's output instead when
+you merely failed to get one.
+
+Register either before `AddOllMemMemory()`, as with every other component:
+
+```csharp
+builder.Services.AddSingleton<IFactReconciler>(sp => new MyReconciler(
+    sp.GetRequiredService<MyLlmClient>(), new ThresholdFactReconciler()));
+builder.Services.AddOllMemMemory();
+```
+
 ## Packaging a backend
 
 Mirror `OllMem.Models.Ollama` if you want your backend reusable:

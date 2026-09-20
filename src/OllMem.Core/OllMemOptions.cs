@@ -1,3 +1,4 @@
+using OllMem.Core.Reconciliation;
 using OllMem.Core.Retrieval;
 
 namespace OllMem.Core;
@@ -19,4 +20,7 @@ public sealed class OllMemOptions
 
     /// <summary>Soft-decay curve parameters (PRD REQ-4.1).</summary>
     public SoftDecayOptions Decay { get; set; } = new();
+
+    /// <summary>Semantic conflict-detection thresholds (PRD REQ-2.2).</summary>
+    public ReconciliationOptions Reconciliation { get; set; } = new();
 }

@@ -43,6 +43,8 @@ the stack is untouched.
 |-----------|------|-----------------|--------------------|
 | `IEmbeddingService` | text → L2-normalised vector | `HashingEmbeddingService` | `OllamaEmbeddingService` |
 | `IFactExtractor` | transcript → candidate facts | `RuleBasedFactExtractor` | `OllamaFactExtractor` |
+| `IFactReconciler` | does a new fact duplicate or contradict an existing one? | `ThresholdFactReconciler` | `OllamaFactReconciler` |
+| `IMemoryConsolidator` | a session's memories → the facts worth keeping | `PassThroughConsolidator` | `OllamaMemoryConsolidator` |
 | `IVectorStore` | semantic half of the hybrid store | `InMemoryVectorStore` | `SqliteHybridStore`, `GitHybridStore`, `FirestoreHybridStore` |
 | `IGraphStore` | relationship half of the hybrid store | `InMemoryGraphStore` | `SqliteHybridStore`, `GitHybridStore`, `FirestoreHybridStore` |
 | `IBlobStore` | content-addressed encrypted payloads | `InMemoryBlobStore` | `SqliteBlobStore`, `GitBlobStore`, `FirestoreBlobStore` |
@@ -74,10 +76,20 @@ implementations.
 
 1. `IFactExtractor` turns a transcript into `ExtractedFact`s (statement +
    subject/predicate/object edge). Explicit `remember` calls skip this step.
-2. **Conflict resolution** (REQ-2.2): `IGraphStore.FindByRelationAsync` looks
-   up an active memory with the same subject+predicate. If one exists, it's
-   marked `Superseded` and linked to its replacement — never deleted.
-3. `IEmbeddingService` embeds the statement.
+2. `IEmbeddingService` embeds the statement — needed both to store it and to
+   find conflicts, so it happens first.
+3. **Conflict resolution** (REQ-2.2), in two passes:
+   - *Exact relation*: `IGraphStore.FindByRelationAsync` looks up an active
+     memory with the same subject+predicate. Same object → the existing
+     memory is refreshed; different object → it is retired. This pass is
+     **skipped for a memory saved without a triple**, which gets a synthetic
+     `("user", "note")` edge that every other untyped memory in the namespace
+     would collide with.
+   - *Semantic*: the nearest memories by cosine similarity go to
+     `IFactReconciler`, which reports `Duplicate` (refresh the existing one),
+     `Supersedes` (retire it) or `Unrelated` (store both).
+   A retired memory is marked `Superseded`, stamped with `RetiredAt`, and
+   linked to its replacement — never deleted.
 4. `IPayloadCipher` encrypts the payload with a key derived (HKDF-SHA256) from
    the master key and the namespace key, then `IBlobStore.PutAsync` stores the
    ciphertext content-addressed by SHA-256.
@@ -85,6 +97,9 @@ implementations.
    `IGraphStore`.
 6. `IAuditLog.AppendAsync` records the action, chained to the previous entry's
    hash.
+
+`RememberResult.Outcome` reports which path was taken: `Created`, `Refreshed`
+or `Superseded`.
 
 **Read path** (`RecallAsync`):
 
@@ -103,6 +118,33 @@ implementations.
 6. Results are deduplicated and reranked by
    `similarity × decayWeight × namespaceAffinity`; access stats of the returned
    nodes are updated (feeding back into future decay).
+
+### Reading the past
+
+`RecallAsync` and `NeighborsAsync` take an optional `asOf`, and `HistoryAsync`
+returns a relation's whole timeline. All three rest on one idea: a memory is
+current over the half-open window `[CreatedAt, RetiredAt)`.
+
+- `IVectorStore.ListHistoryAsync` / `ListOwnersHistoryAsync` return nodes
+  **regardless of status** — the search methods filter retired nodes out, so a
+  historical recall ranks candidates in the engine instead of the store.
+- Decay is evaluated at the viewpoint, not at `now`; judging a historical
+  answer by today's clock would fade every fact by the elapsed time.
+- A historical read never calls `Touch`, so looking into the past cannot
+  distort the decay model. It is still audited, with the viewpoint in the detail.
+- Memories retired before `RetiredAt` existed have it resolved from their
+  successor's `CreatedAt`. One with no successor is treated as *never* current
+  rather than current forever, so a historical read can't resurrect it.
+
+### Consolidation
+
+`ConsolidateAsync(source, target)` drains a session namespace into a durable
+one: `IMemoryConsolidator` summarises the session's active memories, each
+resulting fact goes through the normal write path in `target` (so the usual
+conflict resolution applies, and re-running promotes nothing new), and the
+originals are marked `Consolidated` with a `RetiredAt`. They leave recall and
+the graph but stay in history and in `asOf` reads. `dryRun` returns the facts
+without writing anything.
 
 ## Namespaces and scopes
 
@@ -179,13 +221,20 @@ builder.Services.AddOllMemMemory(o =>
         HalfLifeDays = 30.0,          // recency half-life of the decay curve
         UsageBoost = 0.15,            // how strongly repeated access re-boosts
     };
+    o.Reconciliation = new ReconciliationOptions
+    {
+        DuplicateSimilarity = 0.92,   // at/above this, a new fact refreshes the old one
+        CandidateSimilarity = 0.75,   // below this, nothing is ever merged
+        MaxCandidates = 5,            // how many neighbours to weigh up
+    };
 });
 ```
 
 ## Hosts
 
 - **`OllMem.Api`** — ASP.NET Core minimal API (`/v1/remember`, `/v1/extract`,
-  `/v1/recall`, `/v1/neighbors`, `/v1/audit`, `/v1/keypair`, `/health`) with
+  `/v1/recall`, `/v1/neighbors`, `/v1/history`, `/v1/consolidate`,
+  `/v1/audit`, `/v1/keypair`, `/health`) with
   optional Ed25519 signature middleware. `public partial class Program`
   exists so `WebApplicationFactory` can drive it in integration tests.
 - **`OllMem.Mcp`** — stdio MCP server built on the
@@ -203,13 +252,15 @@ builder.Services.AddOllMemMemory(o =>
 | REQ-1.2 SDK/MCP integration | `OllMem.Mcp` + `OllMem.Api` |
 | REQ-1.3 Ed25519 request signing | `Security/Ed25519SignatureScheme.cs`, `Api/SignatureAuthMiddleware.cs` |
 | REQ-2.1 Automatic fact extraction | `Extraction/RuleBasedFactExtractor.cs`, `OllMem.Models.Ollama/OllamaFactExtractor.cs` |
-| REQ-2.2 Conflict resolution | `Engine/OllMemMemoryEngine.StoreFactAsync` |
+| REQ-2.2 Conflict resolution | `Engine/OllMemMemoryEngine.StoreFactAsync`, `Reconciliation/ThresholdFactReconciler.cs`, `OllMem.Models.Ollama/OllamaFactReconciler.cs` |
 | REQ-2.3 Edge encryption | `Security/AesGcmPayloadCipher.cs` |
 | REQ-3.1 Hybrid datastore (graph + vector) | `Storage/InMemoryVectorStore.cs`, `Storage/InMemoryGraphStore.cs` |
 | REQ-3.2 Persistent blob storage | `Storage/InMemoryBlobStore.cs`, `OllMem.Storage.Sqlite/SqliteBlobStore.cs`, `OllMem.Storage.Firestore/FirestoreBlobStore.cs` |
 | REQ-3.3 Cryptographic audit logs | `Security/HashChainedAuditLog.cs` |
 | REQ-4.1 Soft-decay scoring | `Retrieval/SoftDecayScorer.cs` |
 | REQ-4.2 Time-aware reranking | `Engine/OllMemMemoryEngine.RecallAsync` |
+| Temporal reads (as-of recall, relation history) | `Engine/OllMemMemoryEngine.HistoryAsync`, `Domain/MemoryNode.RetiredAt` |
+| Session consolidation | `Engine/OllMemMemoryEngine.ConsolidateAsync`, `Consolidation/PassThroughConsolidator.cs` |
 
 ## Open-source dependencies
 

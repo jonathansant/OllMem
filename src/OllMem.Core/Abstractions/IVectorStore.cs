@@ -40,4 +40,21 @@ public interface IVectorStore
 
     /// <summary>All active nodes across every namespace (used by the graph visualizer).</summary>
     ValueTask<IReadOnlyList<MemoryNode>> ListAllActiveAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Every node in a namespace regardless of status — superseded and
+    /// consolidated included. Backs as-of recall and relation history, which
+    /// have to see facts that are no longer current.
+    /// </summary>
+    ValueTask<IReadOnlyList<MemoryNode>> ListHistoryAsync(Namespace ns, CancellationToken ct = default);
+
+    /// <summary>
+    /// Like <see cref="ListHistoryAsync"/> but spanning every namespace
+    /// belonging to any of <paramref name="owners"/>, so as-of recall can reach
+    /// sibling namespaces and linked identities. Owner matching is
+    /// case-insensitive, matching <see cref="Namespace.Key"/>.
+    /// </summary>
+    ValueTask<IReadOnlyList<MemoryNode>> ListOwnersHistoryAsync(
+        IReadOnlySet<string> owners,
+        CancellationToken ct = default);
 }

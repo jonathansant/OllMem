@@ -67,7 +67,8 @@ public sealed class SqliteStoreContext
                 last_accessed_at TEXT NOT NULL,
                 access_count     INTEGER NOT NULL,
                 status           INTEGER NOT NULL,
-                superseded_by    TEXT
+                superseded_by    TEXT,
+                retired_at       TEXT
             );
 
             CREATE INDEX IF NOT EXISTS ix_memories_ns_status
@@ -99,5 +100,36 @@ public sealed class SqliteStoreContext
             );
             """;
         cmd.ExecuteNonQuery();
+
+        Migrate(conn);
+    }
+
+    /// <summary>
+    /// Bring a database created by an older OllMem up to the current schema.
+    /// Only additive column adds live here: SQLite has no "ADD COLUMN IF NOT
+    /// EXISTS", so each one is guarded by a PRAGMA lookup.
+    /// </summary>
+    private static void Migrate(SqliteConnection conn)
+    {
+        if (!ColumnExists(conn, "memories", "retired_at"))
+        {
+            using var alter = conn.CreateCommand();
+            alter.CommandText = "ALTER TABLE memories ADD COLUMN retired_at TEXT";
+            alter.ExecuteNonQuery();
+        }
+    }
+
+    private static bool ColumnExists(SqliteConnection conn, string table, string column)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"PRAGMA table_info({table})";
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
     }
 }

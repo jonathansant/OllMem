@@ -77,6 +77,10 @@ For developers:
 
 - **Autonomous** — facts are extracted from raw transcripts automatically;
   contradictions supersede old facts instead of deleting them (REQ-2.1/2.2).
+- **Knows a restatement when it sees one** — conflicts are caught by meaning,
+  not just by an exact subject+predicate match, so rewording a fact refreshes
+  it instead of piling up near-duplicates. With a local model it also retires
+  a fact a new one contradicts through different words entirely.
 - **Hybrid recall** — knowledge graph + vector search, reranked by a
   soft-decay freshness weight so stale facts fade but never vanish
   (REQ-3.1/4.1/4.2).
@@ -87,6 +91,12 @@ For developers:
   recall spans all of them. Links are symmetric, transitive and sync with your
   memory; nothing is merged or re-encrypted, and unlinked owners stay fully
   compartmentalised.
+- **Answers as of any date** — nothing is deleted, so recall and graph
+  traversal can be asked what the memory said last month, and every
+  relationship has a full timeline of when each version was true.
+- **Sessions that wrap up** — consolidate a finished session and what it
+  learned is promoted into durable agent/user memory, while the short-lived
+  chatter leaves recall without being lost.
 - **Verifiable & encrypted** — AES-256-GCM per-namespace encryption at rest,
   Ed25519 request signing, hash-chained tamper-evident audit log
   (REQ-1.3/2.3/3.3).

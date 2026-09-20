@@ -81,6 +81,31 @@ public sealed class InMemoryVectorStore : IVectorStore
         ValueTask.FromResult<IReadOnlyList<MemoryNode>>(
             _nodes.Values.Where(n => n.Status == MemoryStatus.Active).ToList());
 
+    public ValueTask<IReadOnlyList<MemoryNode>> ListHistoryAsync(
+        Namespace ns, CancellationToken ct = default)
+    {
+        if (!_byNamespace.TryGetValue(ns.Key, out var bucket))
+            return ValueTask.FromResult<IReadOnlyList<MemoryNode>>([]);
+
+        var all = bucket.Keys
+            .Select(id => _nodes.GetValueOrDefault(id))
+            .OfType<MemoryNode>()
+            .ToList();
+        return ValueTask.FromResult<IReadOnlyList<MemoryNode>>(all);
+    }
+
+    public ValueTask<IReadOnlyList<MemoryNode>> ListOwnersHistoryAsync(
+        IReadOnlySet<string> owners, CancellationToken ct = default)
+    {
+        if (owners.Count == 0)
+            return ValueTask.FromResult<IReadOnlyList<MemoryNode>>([]);
+
+        // Don't rely on the caller's set using a case-insensitive comparer.
+        var match = new HashSet<string>(owners, StringComparer.OrdinalIgnoreCase);
+        var all = _nodes.Values.Where(n => match.Contains(n.Namespace.Owner)).ToList();
+        return ValueTask.FromResult<IReadOnlyList<MemoryNode>>(all);
+    }
+
     private IEnumerable<MemoryNode> EnumerateActive(Namespace ns)
     {
         if (!_byNamespace.TryGetValue(ns.Key, out var bucket))

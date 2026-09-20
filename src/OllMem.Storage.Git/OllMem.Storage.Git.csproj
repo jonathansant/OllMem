@@ -15,4 +15,10 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- The node document's merge rule is the crux of multi-machine sync;
+         it is unit-tested directly rather than only through real git conflicts. -->
+    <InternalsVisibleTo Include="OllMem.Core.Tests" />
+  </ItemGroup>
+
 </Project>

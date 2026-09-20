@@ -57,6 +57,20 @@ Pass these on every call unless told otherwise:
 `scope` must be exactly `user`, `agent`, or `session` (case-insensitive); an
 empty `scopeId` falls back to `"default"`.
 
+### Reading the past
+
+Recall answers with what is true *now*. When the question is what changed, or
+what was believed at some earlier point, use the temporal tools instead of
+inferring from timestamps:
+
+- `ollmem_recall` / `ollmem_neighbors` with `asOf` (ISO-8601, e.g.
+  `2026-01-31T00:00:00Z`) answer as the memory stood then. A historical read
+  does not count as an access, so it cannot distort ranking.
+- `ollmem_history` with a `subject` (and optional `predicate`) returns every
+  version of that relation, oldest first, each with `validFrom` / `validTo`.
+  The current one has `validTo: null`. Reach for this when the user asks "when
+  did this change" or "what did we decide before".
+
 ### Recall — at the start of work
 
 1. On the first substantive task of a session, call `ollmem_recall` with a
@@ -135,6 +149,11 @@ Rules:
   for the same subject+predicate automatically supersede the old value (the
   response returns `supersededId`) — so prefer triples for facts that can
   change over time. Superseded facts are retained, not deleted.
+- Check the `outcome` field on the response: `Created` (new memory),
+  `Refreshed` (OllMem already knew this and only bumped its recency) or
+  `Superseded` (it replaced an older fact). A `Refreshed` result is not a
+  failure — it means the fact was already on record, possibly in different
+  words, since conflicts are detected semantically as well as by triple.
 - Don't save what the repo already records (code structure, git history,
   CLAUDE.md content) or trivia only relevant to the current conversation.
 - Save at the moment you learn the fact, not in a batch at the end — sessions
@@ -148,14 +167,25 @@ transcript excerpt (prefix user lines with `User: ` so your own utterances are
 ignored) instead of many individual `ollmem_remember` calls. The native store
 still needs its own write — `ollmem_extract` covers OllMem only.
 
+If you used the `session` scope during the conversation, consolidate it before
+finishing: `ollmem_consolidate` with `owner: "jonathansant"`, the `sessionId`
+you wrote under, and `targetScope: "agent"` / `targetScopeId: "claude-code"`.
+Run it with `dryRun: true` first and check the facts it proposes; anything
+wrong is a sign the session memories were too task-specific to promote. The
+session's own memories are then marked consolidated — they leave recall but
+remain in `ollmem_history` and in `asOf` reads, so nothing is lost. Running it
+twice is harmless; the second run finds nothing left to promote.
+
 ### Tool reference
 
 | Tool | Purpose |
 | --- | --- |
 | `ollmem_remember` | Store one fact; optional subject/predicate/object triple. |
-| `ollmem_recall` | Hybrid semantic search with decay + namespace-affinity reranking. |
+| `ollmem_recall` | Hybrid semantic search with decay + namespace-affinity reranking; `asOf` reads the past. |
 | `ollmem_extract` | Mine a transcript for facts and store them in bulk. |
-| `ollmem_neighbors` | Traverse the knowledge graph for an entity, optionally filtered by predicate. |
+| `ollmem_neighbors` | Traverse the knowledge graph for an entity, optionally filtered by predicate; `asOf` reads the past. |
+| `ollmem_history` | Every version of a relation over time, each with the window it was true for. |
+| `ollmem_consolidate` | Promote a session scope's memories into `agent`/`user` and retire the originals. |
 | `ollmem_link_owners` | Declare two owner ids the same caller. |
 | `ollmem_linked_owners` | List all linked owner ids. |
 | `ollmem_unlink_owners` | Remove an owner link. |

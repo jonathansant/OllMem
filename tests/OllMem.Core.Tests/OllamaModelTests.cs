@@ -173,28 +173,4 @@ public sealed class OllamaModelTests
         LastAccessedAt = DateTimeOffset.UtcNow,
     };
 
-    /// <summary>Plays an Ollama server: /api/version, /api/embed, /api/chat.</summary>
-    private sealed class FakeOllamaHandler : HttpMessageHandler
-    {
-        public float[] EmbedVector { get; init; } = [1f, 0f];
-        public string ChatContent { get; init; } = """{"facts":[]}""";
-
-        protected override Task<HttpResponseMessage> SendAsync(
-            HttpRequestMessage request, CancellationToken ct)
-        {
-            var path = request.RequestUri!.AbsolutePath;
-            var payload = path switch
-            {
-                "/api/version" => """{"version":"0.0.0-fake"}""",
-                "/api/embed" => JsonSerializer.Serialize(new { embeddings = new[] { EmbedVector } }),
-                "/api/chat" => JsonSerializer.Serialize(new { message = new { role = "assistant", content = ChatContent } }),
-                _ => throw new InvalidOperationException($"Unexpected path {path}"),
-            };
-
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(payload, Encoding.UTF8, "application/json"),
-            });
-        }
-    }
 }

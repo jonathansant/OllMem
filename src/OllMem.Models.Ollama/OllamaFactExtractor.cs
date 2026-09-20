@@ -1,6 +1,4 @@
-using System.Text.Json;
 using OllMem.Core.Abstractions;
-using OllMem.Core.Domain;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -32,8 +30,6 @@ public sealed class OllamaFactExtractor : IFactExtractor
         - "statement" is one short third-person sentence.
         - If there are no facts, respond {"facts":[]}.
         """;
-
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     private readonly OllamaClient _client;
     private readonly IFactExtractor _fallback;
@@ -75,40 +71,5 @@ public sealed class OllamaFactExtractor : IFactExtractor
         return await _fallback.ExtractAsync(transcript, ct);
     }
 
-    private static IReadOnlyList<ExtractedFact>? Parse(string reply)
-    {
-        FactsEnvelope? envelope;
-        try
-        {
-            envelope = JsonSerializer.Deserialize<FactsEnvelope>(reply, Json);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-
-        if (envelope?.Facts is null)
-            return null;
-
-        var results = new List<ExtractedFact>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var fact in envelope.Facts)
-        {
-            if (string.IsNullOrWhiteSpace(fact.Statement) ||
-                string.IsNullOrWhiteSpace(fact.Predicate) ||
-                string.IsNullOrWhiteSpace(fact.Object))
-                continue;
-
-            var subject = string.IsNullOrWhiteSpace(fact.Subject) ? "user" : fact.Subject.Trim();
-            var edge = GraphEdge.Create(subject, fact.Predicate.Trim(), fact.Object.Trim());
-            if (seen.Add(edge.RelationKey + "=>" + edge.Object.ToLowerInvariant()))
-                results.Add(new ExtractedFact(fact.Statement.Trim(), edge));
-        }
-
-        return results;
-    }
-
-    private sealed record FactsEnvelope(FactDto[]? Facts);
-
-    private sealed record FactDto(string? Statement, string? Subject, string? Predicate, string? Object);
+    private static IReadOnlyList<ExtractedFact>? Parse(string reply) => FactsJson.Parse(reply);
 }

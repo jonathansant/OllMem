@@ -116,6 +116,45 @@ public sealed class SqliteHybridStore : IVectorStore, IGraphStore
         return list;
     }
 
+    public async ValueTask<IReadOnlyList<MemoryNode>> ListHistoryAsync(
+        Namespace ns, CancellationToken ct = default)
+    {
+        await using var conn = _ctx.OpenConnection();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"SELECT {Columns} FROM memories WHERE namespace_key = $ns";
+        cmd.Parameters.AddWithValue("$ns", ns.Key);
+
+        var list = new List<MemoryNode>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            list.Add(Map(reader));
+        return list;
+    }
+
+    public async ValueTask<IReadOnlyList<MemoryNode>> ListOwnersHistoryAsync(
+        IReadOnlySet<string> owners, CancellationToken ct = default)
+    {
+        if (owners.Count == 0)
+            return [];
+
+        // Filter in SQL for the same reason SearchOwnersAsync does: rows
+        // belonging to other owners are never read back at all.
+        var normalized = owners.Select(o => o.Trim().ToLowerInvariant()).ToList();
+        await using var conn = _ctx.OpenConnection();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            $"SELECT {Columns} FROM memories " +
+            $"WHERE lower(owner) IN ({string.Join(", ", normalized.Select((_, i) => $"$o{i}"))})";
+        for (var i = 0; i < normalized.Count; i++)
+            cmd.Parameters.AddWithValue($"$o{i}", normalized[i]);
+
+        var list = new List<MemoryNode>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            list.Add(Map(reader));
+        return list;
+    }
+
     // ---- IGraphStore --------------------------------------------------------
 
     // The row is written by the vector upsert; the graph view is the same table,
@@ -170,7 +209,7 @@ public sealed class SqliteHybridStore : IVectorStore, IGraphStore
 
     private const string Columns =
         "id, namespace_key, owner, scope, scope_id, statement, subject, predicate, object, " +
-        "embedding, blob_ref, created_at, last_accessed_at, access_count, status, superseded_by";
+        "embedding, blob_ref, created_at, last_accessed_at, access_count, status, superseded_by, retired_at";
 
     private static async ValueTask UpsertAsync(SqliteConnection conn, MemoryNode node, CancellationToken ct)
     {
@@ -179,10 +218,12 @@ public sealed class SqliteHybridStore : IVectorStore, IGraphStore
             """
             INSERT INTO memories
                 (id, namespace_key, owner, scope, scope_id, statement, subject, predicate, object,
-                 embedding, blob_ref, created_at, last_accessed_at, access_count, status, superseded_by)
+                 embedding, blob_ref, created_at, last_accessed_at, access_count, status, superseded_by,
+                 retired_at)
             VALUES
                 ($id, $ns, $owner, $scope, $scopeId, $statement, $subject, $predicate, $object,
-                 $embedding, $blobRef, $createdAt, $lastAccessedAt, $accessCount, $status, $supersededBy)
+                 $embedding, $blobRef, $createdAt, $lastAccessedAt, $accessCount, $status, $supersededBy,
+                 $retiredAt)
             ON CONFLICT(id) DO UPDATE SET
                 statement = excluded.statement,
                 subject = excluded.subject,
@@ -193,7 +234,8 @@ public sealed class SqliteHybridStore : IVectorStore, IGraphStore
                 last_accessed_at = excluded.last_accessed_at,
                 access_count = excluded.access_count,
                 status = excluded.status,
-                superseded_by = excluded.superseded_by;
+                superseded_by = excluded.superseded_by,
+                retired_at = excluded.retired_at;
             """;
         cmd.Parameters.AddWithValue("$id", node.Id.ToString());
         cmd.Parameters.AddWithValue("$ns", node.Namespace.Key);
@@ -211,6 +253,8 @@ public sealed class SqliteHybridStore : IVectorStore, IGraphStore
         cmd.Parameters.AddWithValue("$accessCount", node.AccessCount);
         cmd.Parameters.AddWithValue("$status", (int)node.Status);
         cmd.Parameters.AddWithValue("$supersededBy", (object?)node.SupersededBy?.ToString() ?? DBNull.Value);
+        cmd.Parameters.AddWithValue(
+            "$retiredAt", node.RetiredAt is { } retired ? Iso(retired) : (object)DBNull.Value);
 
         await cmd.ExecuteNonQueryAsync(ct);
     }
@@ -231,6 +275,7 @@ public sealed class SqliteHybridStore : IVectorStore, IGraphStore
             AccessCount = r.GetInt32(13),
             Status = (MemoryStatus)r.GetInt32(14),
             SupersededBy = r.IsDBNull(15) ? null : Guid.Parse(r.GetString(15)),
+            RetiredAt = r.IsDBNull(16) ? null : ParseIso(r.GetString(16)),
         };
     }
 

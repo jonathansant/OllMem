@@ -67,7 +67,22 @@ curl -s -X POST $BASE/v1/extract -H 'Content-Type: application/json' -d '{
 ```
 
 The response includes `supersededId` — the ID of the old "Berlin" fact that
-just got retired.
+just got retired — and `outcome`, which says which of three things happened:
+
+| `outcome` | Meaning |
+|-----------|---------|
+| `Created` | A new memory was saved |
+| `Refreshed` | OllMem already knew this; it just marked the existing memory as still current |
+| `Superseded` | The new fact replaced an older one, which was retired |
+
+OllMem spots a clash two ways. The obvious one is a new value for a
+`subject`/`predicate` it already has ("lives in" changing from Berlin to
+Munich). The second is by **meaning**: saving the same thing in different
+words refreshes the existing memory instead of piling up near-duplicates.
+With a local Ollama model running it goes further and can retire a fact that a
+new one contradicts even when the wording and the labels are different
+("prefers bun" replacing "uses npm"). Without a model, OllMem only ever merges
+restatements — it will never quietly drop a fact it isn't sure about.
 
 ## Ask questions (`/v1/recall`)
 
@@ -89,6 +104,73 @@ Each result comes with these scores:
 - `finalScore` — similarity × freshness × affinity; results are sorted by this
 
 `topK` is how many results you want (1–100, default 5).
+
+## Looking back in time
+
+Nothing is ever deleted, so OllMem can answer as it would have answered on any
+past date. Add `asOf` to a recall and facts saved later become invisible, while
+facts retired since count as current again:
+
+```bash
+curl -s -X POST $BASE/v1/recall -H 'Content-Type: application/json' -d '{
+  "owner":"demo","scope":"user","scopeId":"u1",
+  "query":"where does the user live","topK":3,
+  "asOf":"2026-01-31T00:00:00Z"
+}'
+```
+
+A look into the past doesn't count as using a memory, so it can't make a
+retired fact look freshly relevant. `/v1/neighbors` takes the same `asOf`.
+
+### When did this change? (`/v1/history`)
+
+`/v1/history` gives the whole timeline of one relationship, oldest first:
+
+```bash
+curl -s "$BASE/v1/history?owner=demo&scope=user&scopeId=u1&subject=user&predicate=lives%20in"
+```
+
+Each entry carries `validFrom`, `validTo` and `current`. The entry still in
+force has `validTo: null` and `current: true`; the others show exactly when
+they stopped being true. Leave `predicate` out for every relationship of that
+subject.
+
+## Wrapping up a session (`/v1/consolidate`)
+
+The `session` scope is for the here and now — what the agent is working on
+right this conversation. Left alone it piles up and keeps surfacing in recall
+long after it stopped mattering.
+
+Consolidating a session sorts that out: OllMem summarises what the session
+learned into durable facts, saves them in an `agent` or `user` scope, and marks
+the session's own memories as consolidated so they leave recall while staying
+on record.
+
+Always look first with `dryRun`:
+
+```bash
+curl -s -X POST $BASE/v1/consolidate -H 'Content-Type: application/json' -d '{
+  "owner":"demo","sessionId":"s1",
+  "targetScope":"agent","targetScopeId":"claude-code",
+  "dryRun":true
+}'
+```
+
+That returns the `facts` it would promote and changes nothing. Drop `dryRun`
+to go ahead. The response then also lists what was `promoted` (each with its
+own `outcome`) and the `retiredSessionMemories`.
+
+Two things worth knowing:
+
+- **It's safe to run twice.** The second run finds nothing left to promote.
+- **Nothing is lost.** The session memories are still visible through
+  `/v1/history` and through `asOf` recall — they just stop competing with
+  current facts.
+
+With a local Ollama model running, consolidation merges duplicates and drops
+throwaway task state. Without one, every session memory is promoted as-is —
+the safe default, since the target scope's own conflict resolution still
+merges restatements.
 
 ## Explore the knowledge graph (`/v1/neighbors`)
 
@@ -222,8 +304,10 @@ chain visibly.
 | `POST /v1/keypair` | Make a signing keypair (for [request signing](configuration.md#locking-the-door-request-signing)) |
 | `POST /v1/remember` | Save one fact you provide |
 | `POST /v1/extract` | Read a transcript and save the facts it finds |
-| `POST /v1/recall` | Search memories by meaning |
-| `GET  /v1/neighbors` | List an entity's relationships |
+| `POST /v1/recall` | Search memories by meaning (add `asOf` to search the past) |
+| `GET  /v1/neighbors` | List an entity's relationships (add `asOf` for the past) |
+| `GET  /v1/history` | The full timeline of one relationship |
+| `POST /v1/consolidate` | Promote a session's memories into an agent or user scope |
 | `GET  /v1/graph` | Dump the graph (+ owner links) — all namespaces, or one via owner/scope/scopeId |
 | `GET  /graph` | Interactive graph visualizer in the browser |
 | `GET  /v1/audit` | Read + verify the audit log |
@@ -238,8 +322,10 @@ these memory tools with zero extra code:
 |------|-----------------------------------|
 | `ollmem_remember` | Save one fact |
 | `ollmem_extract` | Save all facts from a conversation |
-| `ollmem_recall` | Look up relevant memories |
+| `ollmem_recall` | Look up relevant memories (`asOf` looks into the past) |
 | `ollmem_neighbors` | Browse what it knows about something |
+| `ollmem_history` | See how something changed, and when |
+| `ollmem_consolidate` | Wrap up a session into durable memory |
 | `ollmem_link_owners` | Declare two owner ids to be the same person |
 | `ollmem_unlink_owners` | Undo a link |
 | `ollmem_linked_owners` | List every owner id linked to one |

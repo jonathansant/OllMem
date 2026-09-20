@@ -133,6 +133,45 @@ public sealed class GitHybridStore : IVectorStore, IGraphStore
         }
     }
 
+    public async ValueTask<IReadOnlyList<MemoryNode>> ListHistoryAsync(
+        Namespace ns, CancellationToken ct = default)
+    {
+        await _ctx.Gate.WaitAsync(ct);
+        try
+        {
+            return ReadNamespace(ns).ToList();
+        }
+        finally
+        {
+            _ctx.Gate.Release();
+        }
+    }
+
+    public async ValueTask<IReadOnlyList<MemoryNode>> ListOwnersHistoryAsync(
+        IReadOnlySet<string> owners, CancellationToken ct = default)
+    {
+        if (owners.Count == 0)
+            return [];
+
+        await _ctx.Gate.WaitAsync(ct);
+        try
+        {
+            // Same owner-directory shortcut as SearchOwnersAsync: only the
+            // requested owners' files are read, not the whole tree.
+            return owners
+                .Select(o => Path.Combine(_ctx.NodesDirectory, EscapeSegment(o)))
+                .Where(Directory.Exists)
+                .SelectMany(dir => Directory.EnumerateFiles(dir, "*.json", SearchOption.AllDirectories))
+                .Select(ReadNode)
+                .OfType<MemoryNode>()
+                .ToList();
+        }
+        finally
+        {
+            _ctx.Gate.Release();
+        }
+    }
+
     // ---- IGraphStore --------------------------------------------------------
 
     // The node document is written by the vector upsert; the graph view reads

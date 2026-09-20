@@ -91,7 +91,7 @@ v1.MapPost("/remember", async (RememberRequest req, HttpContext ctx, IMemoryEngi
     }
 
     var result = await engine.RememberAsync(ns, req.Statement, edge, ct);
-    return Results.Ok(new RememberResponse(MemoryDto.From(result.Node), result.SupersededId));
+    return Results.Ok(RememberResponse.From(result));
 });
 
 // Auto-extract facts from a transcript and store them (REQ-2.1).
@@ -101,9 +101,7 @@ v1.MapPost("/extract", async (ExtractRequest req, HttpContext ctx, IMemoryEngine
         return Results.BadRequest(new { error });
 
     var results = await engine.ExtractAndStoreAsync(ns, req.Transcript, ct);
-    var payload = results
-        .Select(r => new RememberResponse(MemoryDto.From(r.Node), r.SupersededId))
-        .ToList();
+    var payload = results.Select(RememberResponse.From).ToList();
     return Results.Ok(new { count = payload.Count, memories = payload });
 });
 
@@ -115,12 +113,26 @@ v1.MapPost("/recall", async (RecallRequest req, HttpContext ctx, IMemoryEngine e
     if (string.IsNullOrWhiteSpace(req.Query))
         return Results.BadRequest(new { error = "query is required" });
 
-    var results = await engine.RecallAsync(ns, req.Query, Math.Clamp(req.TopK, 1, 100), ct);
+    var results = await engine.RecallAsync(ns, req.Query, Math.Clamp(req.TopK, 1, 100), req.AsOf, ct);
     return Results.Ok(results.Select(ScoredMemoryDto.From).ToList());
 });
 
-// Graph traversal: relationships for an entity (REQ-3.1).
+// Graph traversal: relationships for an entity (REQ-3.1). asOf traverses the
+// graph as it stood at a past instant.
 v1.MapGet("/neighbors", async (
+    string owner, string scope, string scopeId, string subject, string? predicate, DateTimeOffset? asOf,
+    HttpContext ctx, IMemoryEngine engine, CancellationToken ct) =>
+{
+    var req = new RememberRequest { Owner = owner, Scope = scope, ScopeId = scopeId };
+    if (!NamespaceResolver.TryResolve(req, ctx, out var ns, out var error))
+        return Results.BadRequest(new { error });
+
+    var edges = await engine.NeighborsAsync(ns, subject, predicate, asOf, ct);
+    return Results.Ok(edges.Select(EdgeDto.From).ToList());
+});
+
+// Every version of a relation over time, with the window each was current for.
+v1.MapGet("/history", async (
     string owner, string scope, string scopeId, string subject, string? predicate,
     HttpContext ctx, IMemoryEngine engine, CancellationToken ct) =>
 {
@@ -128,8 +140,39 @@ v1.MapGet("/neighbors", async (
     if (!NamespaceResolver.TryResolve(req, ctx, out var ns, out var error))
         return Results.BadRequest(new { error });
 
-    var edges = await engine.NeighborsAsync(ns, subject, predicate, ct);
-    return Results.Ok(edges.Select(EdgeDto.From).ToList());
+    var entries = await engine.HistoryAsync(ns, subject, predicate, ct);
+    return Results.Ok(new { count = entries.Count, entries = entries.Select(HistoryEntryDto.From).ToList() });
+});
+
+// Promote a session's memories into a durable namespace.
+v1.MapPost("/consolidate", async (
+    ConsolidateRequest req, HttpContext ctx, IMemoryEngine engine, CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(req.SessionId))
+        return Results.BadRequest(new { error = "sessionId is required" });
+
+    // Resolve the source through the normal path so signature auth still
+    // decides the owner, then force the target to that same owner: the target
+    // is not caller-supplied namespace coordinates it could point elsewhere.
+    var sourceRequest = new RememberRequest
+    {
+        Owner = req.Owner, Scope = "session", ScopeId = req.SessionId,
+    };
+    if (!NamespaceResolver.TryResolve(sourceRequest, ctx, out var source, out var sourceError))
+        return Results.BadRequest(new { error = sourceError });
+
+    if (!NamespaceResolver.TryParseScope(req.TargetScope, out var targetScope))
+        return Results.BadRequest(new { error = "targetScope must be one of: user, agent, session" });
+    if (targetScope == MemoryScope.Session)
+        return Results.BadRequest(new { error = "targetScope must be agent or user" });
+
+    var target = new Namespace(
+        source.Owner,
+        targetScope,
+        string.IsNullOrWhiteSpace(req.TargetScopeId) ? "default" : req.TargetScopeId);
+
+    var result = await engine.ConsolidateAsync(source, target, req.DryRun, ct);
+    return Results.Ok(ConsolidateResponse.From(result, target));
 });
 
 // Graph dump consumed by the /graph browser visualizer. Without parameters it

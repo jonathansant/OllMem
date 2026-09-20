@@ -188,6 +188,8 @@ a model is missing.
 | `OllMem:Ollama:EmbeddingModel` | `OLLMEM_OLLAMA_EMBED_MODEL` | `nomic-embed-text` | Which model makes the meaning-fingerprints |
 | `OllMem:Ollama:ChatModel` | `OLLMEM_OLLAMA_CHAT_MODEL` | `llama3.2` | Which model reads transcripts for facts |
 | `OllMem:Ollama:UseChatExtraction` | — | `true` | Set `false` to always use the simple rule-based extractor |
+| `OllMem:Ollama:UseChatReconciliation` | `OLLMEM_OLLAMA_RECONCILE` (`off` to disable) | `true` | Let the model judge whether a new fact contradicts an existing one |
+| `OllMem:Ollama:UseChatConsolidation` | `OLLMEM_OLLAMA_CONSOLIDATE` (`off` to disable) | `true` | Let the model summarise a session when consolidating it |
 
 **Swapping models is just configuration.** Anything you `ollama pull` —
 `qwen2.5`, `mistral`, `mxbai-embed-large`, … — works by changing the model
@@ -244,10 +246,31 @@ play with? `POST /v1/keypair` mints one.
 
 ---
 
+## How picky is it about duplicates?
+
+When you save a fact, OllMem compares its meaning against what it already
+knows. Two numbers decide what happens, and both are set in code rather than
+config (see [Tuning the engine](../developer-guide/architecture.md#tuning-the-engine)):
+
+| Setting | Default | What it means |
+|---------|---------|---------------|
+| `Reconciliation:DuplicateSimilarity` | `0.92` | At or above this likeness, a new fact is treated as a restatement and the existing memory is refreshed instead |
+| `Reconciliation:CandidateSimilarity` | `0.75` | Between this and the line above, the facts are related but not obviously the same — the only band where the chat model is asked to judge |
+| `Reconciliation:MaxCandidates` | `5` | How many nearby memories to weigh up |
+
+Lower `DuplicateSimilarity` and OllMem merges more eagerly, at the risk of
+treating two genuinely different facts as one. Raise it and you get more
+near-duplicates. Below `CandidateSimilarity` nothing is ever merged, and with
+no Ollama model running nothing is ever *retired* by meaning alone — only
+restatements are merged.
+
+---
+
 ## Settings only developers touch
 
 A few knobs live in code rather than config files — the embedding
-dimensionality of the offline embedder and the memory-fading curve (`Floor`,
-`HalfLifeDays`, `UsageBoost`). If you're hosting OllMem in your own app you can
-set them when calling `AddOllMemMemory(...)`; see
+dimensionality of the offline embedder, the memory-fading curve (`Floor`,
+`HalfLifeDays`, `UsageBoost`) and the duplicate thresholds above. If you're
+hosting OllMem in your own app you can set them when calling
+`AddOllMemMemory(...)`; see
 [Architecture](../developer-guide/architecture.md#tuning-the-engine).

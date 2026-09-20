@@ -185,6 +185,43 @@ public sealed class GitPersistenceTests : IAsyncLifetime
         Assert.Equal(MemoryStatus.Superseded, merged!.Status);
         Assert.Equal(replacement.Node.Id, merged.SupersededBy);
         Assert.Equal(1, merged.AccessCount);
+
+        // ...including when it stopped being true, so as-of recall agrees on
+        // both machines rather than depending on who merged.
+        Assert.NotNull(merged.RetiredAt);
+        var onA = await hybridA.GetAsync(original.Node.Id);
+        Assert.Equal(merged.RetiredAt, onA!.RetiredAt);
+    }
+
+    [Fact]
+    public async Task History_and_as_of_recall_survive_a_restart()
+    {
+        var ns = new Namespace("owner", MemoryScope.User, "u1");
+        var ctx = NewContext("machine1");
+
+        var before = DateTimeOffset.UtcNow;
+        var (engine1, _, _) = NewEngine(ctx);
+        await engine1.RememberAsync(ns, "User lives in Lisbon", GraphEdge.Create("user", "lives in", "Lisbon"));
+        await engine1.RememberAsync(ns, "User lives in Porto", GraphEdge.Create("user", "lives in", "Porto"));
+        await ctx.SyncAsync();
+
+        // Second "process": the validity windows have to come back out of the
+        // node documents on disk.
+        var (engine2, _, _) = NewEngine(ctx);
+
+        var history = await engine2.HistoryAsync(ns, "user", "lives in");
+        Assert.Equal(2, history.Count);
+        Assert.Contains("Lisbon", history[0].Node.Statement);
+        Assert.NotNull(history[0].ValidTo);
+        Assert.Null(history[1].ValidTo);
+
+        // Nothing was known before the first write.
+        Assert.Empty(await engine2.RecallAsync(ns, "where does the user live", topK: 5, asOf: before));
+
+        // Between the two writes, Lisbon was the current answer.
+        var then = await engine2.RecallAsync(
+            ns, "where does the user live", topK: 5, asOf: history[0].ValidTo!.Value.AddTicks(-1));
+        Assert.Contains("Lisbon", Assert.Single(then).Node.Statement);
     }
 
     [Fact]
@@ -302,5 +339,107 @@ public sealed class GitPersistenceTests : IAsyncLifetime
         {
             // best effort
         }
+    }
+
+    // ---- The merge rule itself ----------------------------------------------
+    // Two machines that diverge must land on the same node whichever of them
+    // performs the merge, or they never agree again. Some divergences are hard
+    // to stage through real git, so the rule is also exercised directly.
+
+    private static MemoryNodeDocument Doc(
+        Guid id, MemoryStatus status, DateTimeOffset? retiredAt, Guid? supersededBy = null, int accessCount = 0)
+    {
+        var epoch = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        return new MemoryNodeDocument(
+            id, "owner", MemoryScope.User, "u1", "User lives in Lisbon",
+            "user", "lives in", "Lisbon", Convert.ToBase64String(new byte[16]), null,
+            epoch, epoch, accessCount, status, supersededBy, retiredAt);
+    }
+
+    [Fact]
+    public void Merging_two_retirements_is_independent_of_direction()
+    {
+        var id = Guid.NewGuid();
+        var epoch = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+        // One machine superseded the fact; the other consolidated the session
+        // it lived in, an hour later.
+        var superseded = Doc(id, MemoryStatus.Superseded, epoch.AddHours(1), Guid.NewGuid());
+        var consolidated = Doc(id, MemoryStatus.Consolidated, epoch.AddHours(2), Guid.NewGuid());
+
+        var fromA = MemoryNodeDocument.Merge(superseded, consolidated);
+        var fromB = MemoryNodeDocument.Merge(consolidated, superseded);
+
+        Assert.Equal(fromA, fromB);
+
+        // The earlier retirement is the one that stuck, with its own successor.
+        Assert.Equal(MemoryStatus.Superseded, fromA.Status);
+        Assert.Equal(epoch.AddHours(1), fromA.RetiredAt);
+        Assert.Equal(superseded.SupersededBy, fromA.SupersededBy);
+    }
+
+    [Fact]
+    public void Merging_retirements_recorded_at_the_same_instant_still_converges()
+    {
+        var id = Guid.NewGuid();
+        var at = new DateTimeOffset(2026, 1, 1, 1, 0, 0, TimeSpan.Zero);
+
+        var superseded = Doc(id, MemoryStatus.Superseded, at, Guid.NewGuid());
+        var consolidated = Doc(id, MemoryStatus.Consolidated, at, Guid.NewGuid());
+
+        Assert.Equal(
+            MemoryNodeDocument.Merge(superseded, consolidated),
+            MemoryNodeDocument.Merge(consolidated, superseded));
+    }
+
+    [Fact]
+    public void A_retirement_beats_an_active_copy_from_either_side()
+    {
+        var id = Guid.NewGuid();
+        var at = new DateTimeOffset(2026, 1, 1, 1, 0, 0, TimeSpan.Zero);
+        var successor = Guid.NewGuid();
+
+        var active = Doc(id, MemoryStatus.Active, null, accessCount: 3);
+        var retired = Doc(id, MemoryStatus.Superseded, at, successor);
+
+        foreach (var merged in new[]
+                 {
+                     MemoryNodeDocument.Merge(active, retired),
+                     MemoryNodeDocument.Merge(retired, active),
+                 })
+        {
+            Assert.Equal(MemoryStatus.Superseded, merged.Status);
+            Assert.Equal(at, merged.RetiredAt);
+            Assert.Equal(successor, merged.SupersededBy);
+
+            // The active side's usage statistics are not lost.
+            Assert.Equal(3, merged.AccessCount);
+        }
+    }
+
+    [Fact]
+    public void A_node_active_on_both_sides_has_no_retirement()
+    {
+        var id = Guid.NewGuid();
+
+        var merged = MemoryNodeDocument.Merge(
+            Doc(id, MemoryStatus.Active, null), Doc(id, MemoryStatus.Active, null, accessCount: 2));
+
+        Assert.Equal(MemoryStatus.Active, merged.Status);
+        Assert.Null(merged.RetiredAt);
+    }
+
+    [Fact]
+    public void A_retirement_with_a_recorded_instant_beats_one_without()
+    {
+        var id = Guid.NewGuid();
+        var at = new DateTimeOffset(2026, 1, 1, 1, 0, 0, TimeSpan.Zero);
+
+        // A node retired by an older OllMem has no instant recorded.
+        var legacy = Doc(id, MemoryStatus.Superseded, null, Guid.NewGuid());
+        var current = Doc(id, MemoryStatus.Superseded, at, Guid.NewGuid());
+
+        Assert.Equal(at, MemoryNodeDocument.Merge(legacy, current).RetiredAt);
+        Assert.Equal(at, MemoryNodeDocument.Merge(current, legacy).RetiredAt);
     }
 }

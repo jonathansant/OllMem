@@ -24,7 +24,8 @@ internal sealed record MemoryNodeDocument(
     DateTimeOffset LastAccessedAt,
     int AccessCount,
     MemoryStatus Status,
-    Guid? SupersededBy)
+    Guid? SupersededBy,
+    DateTimeOffset? RetiredAt = null)
 {
     public static MemoryNodeDocument From(MemoryNode node) => new(
         node.Id,
@@ -41,7 +42,8 @@ internal sealed record MemoryNodeDocument(
         node.LastAccessedAt,
         node.AccessCount,
         node.Status,
-        node.SupersededBy);
+        node.SupersededBy,
+        node.RetiredAt);
 
     public MemoryNode ToNode()
     {
@@ -62,28 +64,61 @@ internal sealed record MemoryNodeDocument(
             AccessCount = AccessCount,
             Status = Status,
             SupersededBy = SupersededBy,
+            RetiredAt = RetiredAt,
         };
     }
 
     /// <summary>
     /// Deterministic, commutative resolution for two divergent versions of the
-    /// same node: a supersede on either side wins (facts must not resurrect),
+    /// same node: a retirement on either side wins (facts must not resurrect),
     /// usage stats take the maximum, and the earliest creation time is kept.
     /// </summary>
     public static MemoryNodeDocument Merge(MemoryNodeDocument ours, MemoryNodeDocument theirs)
     {
         var baseline = theirs.LastAccessedAt > ours.LastAccessedAt ? theirs : ours;
-        var superseded = ours.Status == MemoryStatus.Superseded ? ours
-            : theirs.Status == MemoryStatus.Superseded ? theirs
-            : null;
+        var retired = PickRetirement(ours, theirs);
 
         return baseline with
         {
             CreatedAt = ours.CreatedAt <= theirs.CreatedAt ? ours.CreatedAt : theirs.CreatedAt,
             LastAccessedAt = ours.LastAccessedAt >= theirs.LastAccessedAt ? ours.LastAccessedAt : theirs.LastAccessedAt,
             AccessCount = Math.Max(ours.AccessCount, theirs.AccessCount),
-            Status = superseded?.Status ?? baseline.Status,
-            SupersededBy = superseded?.SupersededBy ?? baseline.SupersededBy,
+
+            // The three retirement fields describe one event, so they are taken
+            // from one side together rather than picked independently.
+            Status = retired?.Status ?? baseline.Status,
+            SupersededBy = retired?.SupersededBy ?? baseline.SupersededBy,
+            RetiredAt = retired?.RetiredAt,
         };
+    }
+
+    /// <summary>
+    /// Choose which side's retirement to keep. Both machines may have retired
+    /// the node independently and differently — one superseding it while the
+    /// other consolidated the session it lived in — so the choice must not
+    /// depend on which side happens to be "ours", or the two machines would
+    /// converge on different answers and never agree again.
+    /// </summary>
+    private static MemoryNodeDocument? PickRetirement(MemoryNodeDocument ours, MemoryNodeDocument theirs)
+    {
+        var a = ours.Status != MemoryStatus.Active ? ours : null;
+        var b = theirs.Status != MemoryStatus.Active ? theirs : null;
+        if (a is null || b is null)
+            return a ?? b;
+
+        // The earliest recorded retirement wins; a recorded instant beats a
+        // node retired before the instant was tracked.
+        if (a.RetiredAt != b.RetiredAt)
+        {
+            if (a.RetiredAt is null)
+                return b;
+            if (b.RetiredAt is null)
+                return a;
+            return a.RetiredAt < b.RetiredAt ? a : b;
+        }
+
+        // Same instant, or neither recorded one: break the tie on the status
+        // itself so the result is still independent of merge direction.
+        return a.Status <= b.Status ? a : b;
     }
 }

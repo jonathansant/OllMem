@@ -110,6 +110,45 @@ public sealed class FirestoreHybridStore : IVectorStore, IGraphStore
         return snapshot.Documents.Select(ToNode).ToList();
     }
 
+    public async ValueTask<IReadOnlyList<MemoryNode>> ListHistoryAsync(
+        Namespace ns, CancellationToken ct = default)
+    {
+        var snapshot = await _ctx.Memories
+            .WhereEqualTo("namespaceKey", ns.Key)
+            .GetSnapshotAsync(ct);
+        return snapshot.Documents.Select(ToNode).ToList();
+    }
+
+    public async ValueTask<IReadOnlyList<MemoryNode>> ListOwnersHistoryAsync(
+        IReadOnlySet<string> owners, CancellationToken ct = default)
+    {
+        if (owners.Count == 0)
+            return [];
+
+        // Same casing tolerance as SearchOwnersAsync: documents written before
+        // owners were normalised kept the caller's casing.
+        var candidates = owners
+            .SelectMany(o => new[] { o.Trim(), o.Trim().ToLowerInvariant() })
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        var results = new List<MemoryNode>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (var i = 0; i < candidates.Count; i += InFilterChunkSize)
+        {
+            var chunk = candidates.Skip(i).Take(InFilterChunkSize).ToList();
+            var snapshot = await _ctx.Memories.WhereIn("owner", chunk).GetSnapshotAsync(ct);
+            foreach (var doc in snapshot.Documents)
+            {
+                if (!seen.Add(doc.Id))
+                    continue;
+                results.Add(ToNode(doc));
+            }
+        }
+
+        return results;
+    }
+
     // ---- IGraphStore --------------------------------------------------------
 
     // The document is written by the vector upsert; the graph view is the same

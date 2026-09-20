@@ -1,7 +1,9 @@
 using OllMem.Core.Abstractions;
 using OllMem.Core.Embeddings;
 using OllMem.Core.Engine;
+using OllMem.Core.Consolidation;
 using OllMem.Core.Extraction;
+using OllMem.Core.Reconciliation;
 using OllMem.Core.Retrieval;
 using OllMem.Core.Security;
 using OllMem.Core.Storage;
@@ -47,6 +49,14 @@ public static class OllMemServiceCollectionExtensions
 
         // Auto-extraction (rule-based default).
         services.TryAddSingleton<IFactExtractor, RuleBasedFactExtractor>();
+
+        // Semantic conflict resolution and session consolidation. Both default
+        // to deterministic offline implementations; the Ollama backend
+        // overrides them when a model is available.
+        services.TryAddSingleton(options.Reconciliation);
+        services.TryAddSingleton<IFactReconciler>(
+            sp => new ThresholdFactReconciler(sp.GetRequiredService<ReconciliationOptions>()));
+        services.TryAddSingleton<IMemoryConsolidator, PassThroughConsolidator>();
 
         // Orchestrator.
         services.TryAddSingleton<IMemoryEngine, OllMemMemoryEngine>();

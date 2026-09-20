@@ -1,7 +1,9 @@
 using OllMem.Core;
 using OllMem.Core.Abstractions;
 using OllMem.Core.Embeddings;
+using OllMem.Core.Consolidation;
 using OllMem.Core.Extraction;
+using OllMem.Core.Reconciliation;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
@@ -66,6 +68,30 @@ public static class OllMemOllamaServiceCollectionExtensions
                 sp.GetRequiredService<OllamaClient>(),
                 new RuleBasedFactExtractor(),
                 sp.GetService<ILoggerFactory>()?.CreateLogger<OllamaFactExtractor>()));
+        }
+
+        // Reconciliation and consolidation degrade per call like extraction
+        // does, so registering them is always safe: a verdict the model
+        // declines to give falls back to the deterministic rule.
+        if (options.UseChatReconciliation)
+        {
+            services.TryAddSingleton<IFactReconciler>(sp =>
+            {
+                var reconciliation = sp.GetService<ReconciliationOptions>() ?? new ReconciliationOptions();
+                return new OllamaFactReconciler(
+                    sp.GetRequiredService<OllamaClient>(),
+                    new ThresholdFactReconciler(reconciliation),
+                    reconciliation,
+                    sp.GetService<ILoggerFactory>()?.CreateLogger<OllamaFactReconciler>());
+            });
+        }
+
+        if (options.UseChatConsolidation)
+        {
+            services.TryAddSingleton<IMemoryConsolidator>(sp => new OllamaMemoryConsolidator(
+                sp.GetRequiredService<OllamaClient>(),
+                new PassThroughConsolidator(),
+                sp.GetService<ILoggerFactory>()?.CreateLogger<OllamaMemoryConsolidator>()));
         }
 
         return services;
