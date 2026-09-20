@@ -673,7 +673,9 @@ DOTNET=""
 find_dotnet() {
   for candidate in dotnet "$HOME/.dotnet/dotnet"; do
     if command -v "$candidate" >/dev/null 2>&1 || [ -x "$candidate" ]; then
-      if "$candidate" --list-sdks 2>/dev/null | grep -q '^10\.'; then
+      # No `grep -q` here: it exits on the first match and, under pipefail, a
+      # SIGPIPE to dotnet would fail the pipeline despite a match.
+      if "$candidate" --list-sdks 2>/dev/null | grep '^10\.' >/dev/null; then
         # Resolve to an absolute path: launchers baked into services run with
         # a minimal PATH where a bare 'dotnet' is not found.
         DOTNET=$(command -v -- "$candidate" 2>/dev/null || printf '%s' "$candidate")

@@ -209,7 +209,9 @@ NEW_REV=$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo "unknow
 DOTNET=""
 for candidate in dotnet "$HOME/.dotnet/dotnet"; do
   if command -v "$candidate" >/dev/null 2>&1 || [ -x "$candidate" ]; then
-    if "$candidate" --list-sdks 2>/dev/null | grep -q '^10\.'; then
+    # No `grep -q` here: it exits on the first match and, under pipefail, a
+    # SIGPIPE to dotnet would fail the pipeline despite a match.
+    if "$candidate" --list-sdks 2>/dev/null | grep '^10\.' >/dev/null; then
       # Resolve to an absolute path: launchers baked into services run with
       # a minimal PATH where a bare 'dotnet' is not found.
       DOTNET=$(command -v -- "$candidate" 2>/dev/null || printf '%s' "$candidate")
@@ -308,7 +310,9 @@ fi
 
 API_RESTARTED=false
 if $BUILD_API; then
-  if [ "$OS" = Darwin ] && launchctl list 2>/dev/null | grep -q com.ollmem.api; then
+  # Query the job directly: piping `launchctl list` into grep -q trips
+  # pipefail via SIGPIPE when grep exits on the first match.
+  if [ "$OS" = Darwin ] && launchctl list com.ollmem.api >/dev/null 2>&1; then
     if launchctl kickstart -k "gui/$(id -u)/com.ollmem.api" >/dev/null 2>&1; then
       API_RESTARTED=true
       note "restarted the launchd service com.ollmem.api"
